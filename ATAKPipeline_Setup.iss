@@ -1,5 +1,5 @@
 #define MyAppName "ATAK Pipeline"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "0.2.1"
 #define MyAppExeName "ATAKPipeline.exe"
 
 [Setup]

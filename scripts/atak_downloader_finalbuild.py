@@ -37,7 +37,11 @@ STATE_GEOJSON_URL = "https://eric.clst.org/assets/wiki/uploads/Stuff/gz_2010_us_
 USGS_TILE_URL = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}"
 USER_AGENT = "ATAK-Ortho-Downloader/1.1"
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    SCRIPT_DIR = Path(sys._MEIPASS) / "scripts"
+else:
+    SCRIPT_DIR = Path(__file__).resolve().parent
+
 DATA_DIR = SCRIPT_DIR / "data"
 ZOOM_ESTIMATE_PATH = DATA_DIR / "zoom_estimates_z10_z16.json"
 LAST_IMAGERY_ROOT_FILE = SCRIPT_DIR / ".last_imagery_root.txt"

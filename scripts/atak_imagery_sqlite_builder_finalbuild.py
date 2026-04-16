@@ -380,6 +380,7 @@ class App:
         self.worker: Optional[threading.Thread] = None
         self.completion_message: Optional[str] = None
         self.error_message: Optional[str] = None
+        self.imagery_root: Optional[Path] = None
 
         self.status_var = tk.StringVar(value="Waiting for configuration...")
         self.summary_var = tk.StringVar(value="")
@@ -435,6 +436,30 @@ class App:
             msg = self.completion_message
             self.completion_message = None
             messagebox.showinfo("Build complete", msg)
+
+            if self.imagery_root and self.imagery_root.is_dir():
+                try:
+                    cleanup = messagebox.askyesno(
+                        "Cleanup raw imagery?",
+                        "SQLite build succeeded.\n\n"
+                        "ATAK only needs the .sqlite output files.\n\n"
+                        f"Delete raw downloaded imagery now?\n\n{self.imagery_root}"
+                    )
+                    if cleanup:
+                        shutil.rmtree(self.imagery_root)
+                        self.append_log(f"Deleted raw imagery folder: {self.imagery_root}")
+                        try:
+                            if LAST_IMAGERY_ROOT_FILE.exists():
+                                LAST_IMAGERY_ROOT_FILE.unlink()
+                                self.append_log(f"Deleted saved imagery path file: {LAST_IMAGERY_ROOT_FILE}")
+                        except Exception as cleanup_exc:
+                            self.append_log(f"Warning: cleanup path file removal failed: {cleanup_exc}")
+                    else:
+                        self.append_log(f"Raw imagery retained: {self.imagery_root}")
+                except Exception as cleanup_exc:
+                    self.append_log(f"Warning: raw imagery cleanup failed: {cleanup_exc}")
+                    messagebox.showwarning("Cleanup warning", f"Raw imagery cleanup failed:\n{cleanup_exc}")
+
             try:
                 self.root.destroy()
 
@@ -479,6 +504,7 @@ class App:
             return
 
         imagery_root = Path(LAST_IMAGERY_ROOT_FILE.read_text(encoding="utf-8").strip())
+        self.imagery_root = imagery_root
         if not imagery_root.is_dir():
             messagebox.showerror("Missing imagery folder", f"Saved imagery folder not found:\n{imagery_root}")
             return
