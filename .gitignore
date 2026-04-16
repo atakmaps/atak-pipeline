@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs / reports
+logs/
+reports/
+*.log
+
+# Generated terrain / imagery / archives
+*.dt0
+*.dt1
+*.dt2
+*.tif
+*.tiff
+*.img
+*.hgt
+*.sqlite
+*.mbtiles
+*.zip
+*.7z
+*.tar
+*.gz
+
+# Working data folders
+DTED2/
+DTED_by_state/
+Hawaii_DEM/
+_states_tmp/
+output/
+build/
+dist/
+
+# Ignore generated data
+New Test/
+backups/
+last_imagery_root.txt
+*.log
+installer-dist/
+atak_pipeline_handoff*.md

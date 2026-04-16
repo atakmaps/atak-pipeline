@@ -1,0 +1,126 @@
+ATAK PIPELINE NEXT-CHATGPT HANDOFF
+
+Project goal
+------------
+Maintain a working ATAK imagery + terrain pipeline with minimal churn and minimal speculative debugging.
+
+User preferences
+----------------
+- Prefer complete replacement file contents instead of line-by-line edits.
+- Prefer copy/paste-ready command blocks.
+- Keep answers practical and concise.
+- For this project, preserve the established workflow and avoid adding features unless asked.
+- Save scripts with clear final names when packaging handoff artifacts.
+
+Scripts in this bundle
+----------------------
+1. atak_downloader_finalbuild.py
+2. atak_imagery_sqlite_builder_finalbuild.py
+3. atak_dted_builder_finalbuild.py
+4. organize_dted_by_state_finalbuild.py
+
+What each script does
+---------------------
+1) Downloader
+- Downloads USGS orthophoto XYZ tiles by state and zoom.
+- Final validated feature set:
+  - GUI
+  - checkbox zoom selection, none selected by default
+  - state boundary auto-download
+  - log folder relative to script
+  - progress window
+  - skips existing tiles
+  - fixed progress-window completion behavior
+
+2) SQLite builder
+- Builds ATAK/osmdroid-style SQLite cache from one state imagery folder.
+- Final requested output behavior:
+  - automatically create output folder `atak_<source>`
+  - SQLite filename inside is `<source>.sqlite`
+
+3) DTED builder
+- Builds DTED2 from DEM GeoTIFF files.
+- This had the most debugging.
+- Final important fix:
+  - latitude-aware width
+  - point-grid half-pixel expansion before DTED translate
+- The bad versions produced:
+  `Warning 1: The corner coordinates of the source are not properly aligned on plain latitude/longitude boundaries.`
+- The final validated version removed that warning in the W155/W156 test and then in nationwide run.
+- Known correct size behavior:
+  - n49 -> 3601 x 3601
+  - n50 -> 1801 x 3601
+
+4) DTED organizer by state
+- Copy, not move
+- Preserve subfolders
+- Copy border tiles to every intersecting state
+- Use default states file:
+  `/media/paul/ExtraDrive/Map/DTED2/us_states_simple.geojson`
+
+Critical DTED debugging history
+-------------------------------
+Earlier versions were wrong because:
+- they used the wrong point-grid right edge / lower edge values
+- or skipped the needed point-grid correction
+- which caused the corner-coordinate warning
+
+The corrected logic used in finalbuild is:
+- warp to the 1x1 degree cell
+- compute half-pixel expansion from width and height
+- apply correct point-grid bounds
+- translate to DTED
+
+Correct point-grid bounds formula
+---------------------------------
+For a 1x1 degree tile:
+- xres = 1 / (width - 1)
+- yres = 1 / (height - 1)
+- ulx = west - xres/2
+- uly = north + yres/2
+- lrx = east + xres/2
+- lry = south - yres/2
+
+If future DTED warnings reappear
+--------------------------------
+Check whether the current script still uses:
+- `lrx = east + half_x`
+not
+- `lrx = east - half_x`
+
+If warning lines appear again, compare against the validated W155/W156 logic first before trying other fixes.
+
+Validation checks for DTED
+--------------------------
+After a run, verify:
+```bash
+gdalinfo /path/to/w156/n49.dt2 | grep "Size is"
+gdalinfo /path/to/w156/n50.dt2 | grep "Size is"
+```
+
+Expected:
+- n49 -> Size is 3601, 3601
+- n50 -> Size is 1801, 3601
+
+Also verify the latest log has no:
+`corner coordinates not properly aligned`
+
+What not to do
+--------------
+- Do not reintroduce speculative DTED fixes without comparing to the validated point-grid version.
+- Do not rename outputs unpredictably.
+- Do not change folder naming conventions unless the user asks.
+
+GitHub goal
+-----------
+The user wants a GitHub-ready bundle of:
+- scripts
+- README files
+- handoff notes
+- setup/posting instructions
+
+The safest repo structure is:
+- root README files
+- scripts/ for finalbuild scripts
+
+End of handoff.
