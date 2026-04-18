@@ -514,10 +514,15 @@ def pump_gui_logs(window: ProgressWindow) -> None:
             window.completion_message = None
             messagebox.showinfo(APP_TITLE, msg)
 
+            upload_dir = None
             try:
                 if LAST_IMAGERY_ROOT_FILE.exists():
                     imagery_root = Path(LAST_IMAGERY_ROOT_FILE.read_text(encoding="utf-8").strip())
                     if imagery_root.is_dir():
+                        from datetime import datetime
+                        date_str = datetime.now().strftime("%Y%m%d")
+                        upload_dir = imagery_root.parent / f"ATAK_Upload_{date_str}"
+
                         cleanup = messagebox.askyesno(
                             APP_TITLE,
                             "DTED build succeeded.\n\n"
@@ -541,6 +546,28 @@ def pump_gui_logs(window: ProgressWindow) -> None:
                     messagebox.showwarning(APP_TITLE, f"Raw imagery cleanup failed:\n{cleanup_exc}")
                 except Exception:
                     pass
+
+            try:
+
+                messagebox.showinfo(
+                    APP_TITLE,
+                    "Your ATAK imagery and DTED build is complete.\n\n"
+                    "Please copy the .sql and DTED files into your /Downloads folder on your Android device."
+                )
+
+                if upload_dir and upload_dir.exists():
+                    import subprocess, sys, os
+                    try:
+                        if sys.platform.startswith("linux"):
+                            subprocess.Popen(["xdg-open", str(upload_dir)])
+                        elif sys.platform.startswith("win"):
+                            os.startfile(str(upload_dir))
+                        elif sys.platform == "darwin":
+                            subprocess.Popen(["open", str(upload_dir)])
+                    except Exception as open_exc:
+                        log(f"WARNING: failed to open upload folder: {open_exc}")
+            except Exception:
+                pass
 
             window.closed = True
             try:
