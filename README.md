@@ -66,7 +66,7 @@ This folder contains:
 
 /Download/
 
-3. Open ATAK — it will automatically detect and use the data
+3. Open ATAK and follow the instructions in the ATAK install document
 
 ### Notes
 
