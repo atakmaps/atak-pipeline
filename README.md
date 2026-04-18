@@ -48,3 +48,29 @@ See docs/BUILD_WINDOWS.md
 ### Release Assets
 Linux: atak-linux-install.zip
 Windows: ATAKPipelineSetup.exe
+
+## Output Files (Important)
+
+After the pipeline completes, your final files will be located in:
+
+ATAK_Upload_YYYYMMDD/
+
+This folder contains:
+- ATAK_SQL_YYYYMMDD_HHMMSS.sqlite
+- dted2_HHMMSS.zip
+
+### What to do next
+
+1. Connect your Android device
+2. Copy BOTH files into:
+
+/Download/
+
+3. Open ATAK — it will automatically detect and use the data
+
+### Notes
+
+- The Imagery/ folder is temporary and can be deleted after completion
+- You will be prompted to remove it automatically
+- The pipeline will open the final folder for you when finished
+
