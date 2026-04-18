@@ -1,4 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "$ROOT/scripts/install_linux.sh"
+SCRIPT="$ROOT/scripts/install_linux.sh"
+
+if [ ! -f "$SCRIPT" ]; then
+    echo "Missing installer script: $SCRIPT"
+    exit 1
+fi
+
+# If not already running in a real terminal, relaunch in one.
+if [ -z "${TERM:-}" ] || [ "${TERM:-dumb}" = "dumb" ]; then
+    if command -v x-terminal-emulator >/dev/null 2>&1; then
+        exec x-terminal-emulator -e bash -lc "\"$SCRIPT\"; echo; echo 'Press Enter to close...'; read -r"
+    elif command -v gnome-terminal >/dev/null 2>&1; then
+        exec gnome-terminal -- bash -lc "\"$SCRIPT\"; echo; echo 'Press Enter to close...'; read -r"
+    elif command -v konsole >/dev/null 2>&1; then
+        exec konsole -e bash -lc "\"$SCRIPT\"; echo; echo 'Press Enter to close...'; read -r"
+    elif command -v xfce4-terminal >/dev/null 2>&1; then
+        exec xfce4-terminal --hold -e "bash -lc '\"$SCRIPT\"'"
+    elif command -v mate-terminal >/dev/null 2>&1; then
+        exec mate-terminal -- bash -lc "\"$SCRIPT\"; echo; echo 'Press Enter to close...'; read -r"
+    elif command -v xterm >/dev/null 2>&1; then
+        exec xterm -hold -e "\"$SCRIPT\""
+    fi
+fi
+
+exec "$SCRIPT"
