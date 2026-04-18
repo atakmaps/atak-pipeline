@@ -6,7 +6,6 @@ VENV_DIR="$ROOT/.venv"
 
 echo "[1/6] Using project root: $ROOT"
 
-# Detect Python
 if ! command -v python3 >/dev/null 2>&1; then
     echo "Python3 not found. Attempting install..."
 
@@ -37,16 +36,8 @@ cat > "$LAUNCHER" <<LAUNCHER_EOF
 #!/usr/bin/env bash
 ROOT="$ROOT"
 
-echo "=== RUNNING IMAGERY DOWNLOADER ==="
+echo "=== RUNNING ATAK PIPELINE ==="
 "\$ROOT/.venv/bin/python" "\$ROOT/scripts/atak_downloader_finalbuild.py"
-
-echo "=== RUNNING SQLITE BUILDER ==="
-"\$ROOT/.venv/bin/python" "\$ROOT/scripts/atak_imagery_sqlite_builder_finalbuild.py"
-
-echo "=== RUNNING DTED DOWNLOADER ==="
-"\$ROOT/.venv/bin/python" "\$ROOT/scripts/atak_dted_downloader.py"
-
-echo "=== ALL TASKS COMPLETE ==="
 LAUNCHER_EOF
 
 chmod +x "$LAUNCHER"

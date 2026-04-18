@@ -21,7 +21,7 @@ from tkinter import filedialog, messagebox, simpledialog
 APP_TITLE = "ATAK DTED Downloader"
 BASE_URL = "http://31.220.30.74/dted"
 USER_AGENT = "ATAK-DTED-Downloader/1.0"
-LAST_IMAGERY_ROOT_FILE = Path(__file__).resolve().parent.parent / "last_imagery_root.txt"
+LAST_IMAGERY_ROOT_FILE = Path(__file__).resolve().parent / ".last_imagery_root.txt"
 
 
 STATE_ABBR_TO_NAME = {
@@ -475,20 +475,12 @@ def run_download(selected_states: List[str], mode: str, output_parent: Path, pac
         log(f"Missing: {stats['missing']}")
         log(f"Failed: {stats['failed']}")
 
-        messagebox.showinfo(
-            APP_TITLE,
-            f"DTED build complete."
-        )
+        progress.completion_message = "DTED build complete."
         try:
             LOGGER.close()
         except Exception:
             pass
-        os._exit(0)
-        try:
-            progress.after(0, lambda: (progress.quit(), progress.destroy()))
-        except Exception:
-            pass
-        progress.after(0, progress.destroy)
+        return
 
     except Exception as exc:
         tb = traceback.format_exc()
@@ -511,10 +503,42 @@ def pump_gui_logs(window: ProgressWindow) -> None:
             msg = window.completion_message
             window.completion_message = None
             messagebox.showinfo(APP_TITLE, msg)
+
+            try:
+                if LAST_IMAGERY_ROOT_FILE.exists():
+                    imagery_root = Path(LAST_IMAGERY_ROOT_FILE.read_text(encoding="utf-8").strip())
+                    if imagery_root.is_dir():
+                        cleanup = messagebox.askyesno(
+                            APP_TITLE,
+                            "DTED build succeeded.\n\n"
+                            "ATAK only needs the final SQLite and DTED outputs.\n\n"
+                            f"Delete raw downloaded imagery now?\n\n{imagery_root}"
+                        )
+                        if cleanup:
+                            import shutil
+                            shutil.rmtree(imagery_root)
+                            log(f"Deleted raw imagery folder: {imagery_root}")
+                            try:
+                                LAST_IMAGERY_ROOT_FILE.unlink()
+                                log(f"Deleted saved imagery path file: {LAST_IMAGERY_ROOT_FILE}")
+                            except Exception as cleanup_exc:
+                                log(f"Warning: saved imagery path file removal failed: {cleanup_exc}")
+                        else:
+                            log(f"Raw imagery retained: {imagery_root}")
+            except Exception as cleanup_exc:
+                log(f"Warning: raw imagery cleanup failed: {cleanup_exc}")
+                try:
+                    messagebox.showwarning(APP_TITLE, f"Raw imagery cleanup failed:\n{cleanup_exc}")
+                except Exception:
+                    pass
+
             window.closed = True
-            window.destroy()
-            import os
-            os._exit(0)
+            try:
+                window.quit()
+                window.destroy()
+            except Exception:
+                pass
+            return
 
         if getattr(window, "error_message", None):
             msg = window.error_message
@@ -556,10 +580,10 @@ def main() -> None:
         log(f"Saved imagery folder not found: {imagery_root}")
         return
 
-    output_folder = str(imagery_root)
+    output_folder = str(imagery_root.parent)
 
     package_name = "DTED"
-    log(f"Using saved imagery folder for DTED output: {output_folder}")
+    log(f"Using imagery parent folder for DTED output: {output_folder}")
 
     progress = ProgressWindow(LOGGER.log_file)
     pump_gui_logs(progress)
