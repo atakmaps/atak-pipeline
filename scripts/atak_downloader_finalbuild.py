@@ -654,8 +654,15 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
 
         output_root = output_parent / "Imagery"
         output_root.mkdir(parents=True, exist_ok=True)
+
+        from datetime import datetime
+        date_str = datetime.now().strftime("%Y%m%d")
+        upload_dir = output_parent / f"ATAK_Upload_{date_str}"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+
         LAST_IMAGERY_ROOT_FILE.write_text(str(output_root), encoding="utf-8")
         log(f"Using output root: {output_root}")
+        log(f"Using upload folder: {upload_dir}")
         log(f"Selected states: {', '.join(state_names)}")
 
         plan: List[Tuple[str, int, int, int, Path]] = []

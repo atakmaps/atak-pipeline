@@ -520,24 +520,31 @@ class App:
         try:
             total = len(state_dirs)
             built = 0
-            for idx, source_dir in enumerate(state_dirs, start=1):
-                output_dir = out_parent / derive_atak_folder_name(source_dir)
-                output_dir.mkdir(parents=True, exist_ok=True)
-                sqlite_path = output_dir / derive_output_name(source_dir)
 
+            from datetime import datetime
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            date_str = datetime.now().strftime("%Y%m%d")
+
+            upload_dir = out_parent / f"ATAK_Upload_{date_str}"
+            upload_dir.mkdir(parents=True, exist_ok=True)
+
+            merged_sqlite = upload_dir / f"ATAK_SQL_{ts}.sqlite"
+
+            self.append_log(f"Merged SQLite target: {merged_sqlite}")
+
+            for idx, source_dir in enumerate(state_dirs, start=1):
                 self.status_var.set(f"Running {idx}/{total}: {source_dir.name}")
                 self.append_log("")
-                self.append_log(f"[{idx}/{total}] Building state: {source_dir.name}")
+                self.append_log(f"[{idx}/{total}] Adding state: {source_dir.name}")
 
                 config = BuildConfig(
                     source_dir=source_dir,
-                    output_dir=output_dir,
-                    sqlite_path=sqlite_path,
+                    output_dir=out_parent,
+                    sqlite_path=merged_sqlite,
                     provider=source_dir.name,
                 )
                 Builder(config, self.logger).run()
                 built += 1
-                self.append_log(f"SUCCESS: {sqlite_path}")
 
             self.status_var.set("Build complete")
             self.append_log("")

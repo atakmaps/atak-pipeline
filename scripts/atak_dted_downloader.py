@@ -398,15 +398,25 @@ def run_download(selected_states: List[str], mode: str, output_parent: Path, pac
     stats = {"downloaded": 0, "existing": 0, "failed": 0, "missing": 0}
 
     try:
-        package_dir = output_parent / derive_package_folder_name(package_name)
-        downloads_dir = package_dir / "_state_zips"
-        extract_root = package_dir / "_extracted_states"
-        final_zip_path = package_dir / "dted2.zip"
+        from datetime import datetime
+        import tempfile
+
+        date_str = datetime.now().strftime("%Y%m%d")
+        ts = datetime.now().strftime("%H%M%S")
+
+        upload_dir = output_parent / f"ATAK_Upload_{date_str}"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+
+        temp_root = Path(tempfile.mkdtemp(prefix="atak_dted_"))
+        downloads_dir = temp_root / "_state_zips"
+        extract_root = temp_root / "_extracted_states"
+        final_zip_path = upload_dir / f"dted2_{ts}.zip"
 
         downloads_dir.mkdir(parents=True, exist_ok=True)
         extract_root.mkdir(parents=True, exist_ok=True)
 
-        log(f"Using package folder: {package_dir}")
+        log(f"Using upload folder: {upload_dir}")
+        log(f"Using temp work folder: {temp_root}")
         log(f"Server base URL: {BASE_URL}")
 
         plan = []
@@ -468,7 +478,7 @@ def run_download(selected_states: List[str], mode: str, output_parent: Path, pac
         log("DTED download complete")
         log(f"Mode: {mode}")
         log(f"Selected states: {', '.join(selected_states)}")
-        log(f"Package folder: {package_dir}")
+        log(f"Upload folder: {upload_dir}")
         log(f"Final ATAK zip: {final_zip_path}")
         log(f"Downloaded: {stats['downloaded']}")
         log(f"Existing: {stats['existing']}")
