@@ -5,13 +5,14 @@
 [Setup]
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-DefaultDirName={autopf}\{#MyAppName}
+DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 OutputDir=installer-dist
 OutputBaseFilename=ATAKPipelineSetup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+PrivilegesRequired=lowest
 
 [Files]
 Source: "dist\{#MyAppExeName}"; DestDir: "{app}"
