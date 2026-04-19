@@ -2,75 +2,52 @@
 
 Cross-platform ATAK imagery pipeline with simple one-click install.
 
+## Current Stable Release
+
+**Current release:** `v0.2.5`
+
+This release includes:
+
+- finalized Linux installer flow
+- Linux desktop launcher creation after install
+- finalized Linux upload-folder workflow
+- isolated Windows build system under `windows_build/`
+- working Windows EXE flow:
+  - downloader
+  - SQLite builder
+  - DTED downloader
+
+---
+
 ## Overview
 
 This project provides a streamlined pipeline for:
 
 - imagery download
 - SQLite creation for ATAK imagery packages
+- DTED package download
+- final ATAK-ready output packaging
 
-Included scripts:
-- atak_downloader_finalbuild.py
-- atak_imagery_sqlite_builder_finalbuild.py
+Primary Linux/source scripts:
 
-## Quick Start
+- `scripts/atak_downloader_finalbuild.py`
+- `scripts/atak_imagery_sqlite_builder_finalbuild.py`
+- `scripts/atak_dted_downloader.py`
 
-1. Go to:
-https://github.com/atakmaps/atak-pipeline/releases
+Windows-specific build copies:
 
-2. Download the latest zip
+- `windows_build/atak_downloader_finalbuild_win.py`
+- `windows_build/atak_imagery_sqlite_builder_finalbuild_win.py`
+- `windows_build/atak_dted_downloader_win.py`
 
-3. Extract it
+---
 
-## Linux
-./install_linux.sh
+## Critical Project Rule
 
-## Windows
-Double-click:
-install_windows.cmd
+**Do not treat Linux runtime scripts and Windows EXE scripts as the same thing anymore.**
 
-## Notes
-- First run installs dependencies
-- Then launches the imagery downloader
+### Linux / source truth
+Linux runtime and source-truth pipeline live in:
 
-## Platform Builds
-
-### Linux
-Run:
-
-./run_atak_pipeline.sh
-
-See docs/RUN_LINUX.md
-
-### Windows
-See docs/BUILD_WINDOWS.md
-
-### Release Assets
-Linux: atak-linux-install.zip
-Windows: ATAKPipelineSetup.exe
-
-## Output Files (Important)
-
-After the pipeline completes, your final files will be located in:
-
-ATAK_Upload_YYYYMMDD/
-
-This folder contains:
-- ATAK_SQL_YYYYMMDD_HHMMSS.sqlite
-- dted2_HHMMSS.zip
-
-### What to do next
-
-1. Connect your Android device
-2. Copy BOTH files into:
-
-/Download/
-
-3. Open ATAK and follow the instructions in the ATAK install document
-
-### Notes
-
-- The Imagery/ folder is temporary and can be deleted after completion
-- You will be prompted to remove it automatically
-- The pipeline will open the final folder for you when finished
-
+```text
+scripts/
