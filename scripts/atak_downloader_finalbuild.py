@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -468,10 +469,14 @@ class ProgressWindow(tk.Tk):
         self.status_var = tk.StringVar(value="Initializing...")
         self.counter_var = tk.StringVar(value="0 / 0")
         self.detail_var = tk.StringVar(value=f"Log: {log_path}")
+        self.speed_var = tk.StringVar(value="Speed: --")
+        self.eta_var = tk.StringVar(value="ETA: --")
 
         tk.Label(top, textvariable=self.status_var, font=("Arial", 11, "bold")).pack(anchor="w")
         tk.Label(top, textvariable=self.counter_var).pack(anchor="w", pady=(4, 0))
-        tk.Label(top, textvariable=self.detail_var, fg="gray30").pack(anchor="w", pady=(4, 8))
+        tk.Label(top, textvariable=self.detail_var, fg="gray30").pack(anchor="w", pady=(4, 4))
+        tk.Label(top, textvariable=self.speed_var, font=("Arial", 10, "bold"), fg="darkgreen").pack(anchor="w")
+        tk.Label(top, textvariable=self.eta_var, font=("Arial", 10, "bold"), fg="darkblue").pack(anchor="w", pady=(0, 8))
 
         self.canvas = tk.Canvas(top, height=24, bg="white", highlightthickness=1, highlightbackground="gray70")
         self.canvas.pack(fill="x")
@@ -523,6 +528,31 @@ class ProgressWindow(tk.Tk):
     def set_status(self, text: str) -> None:
         self.status_var.set(text)
         self.update_idletasks()
+
+    def set_speed_eta(self, speed_bps: float, eta_seconds: Optional[float]) -> None:
+        if speed_bps and speed_bps > 0:
+            self.speed_var.set(f"Speed: {human_bytes(int(speed_bps))}/s")
+        else:
+            self.speed_var.set("Speed: --")
+
+        if eta_seconds is None or eta_seconds < 0 or not math.isfinite(eta_seconds):
+            self.eta_var.set("ETA: --")
+        else:
+            total_seconds = int(max(0, eta_seconds))
+            hours, rem = divmod(total_seconds, 3600)
+            minutes, seconds = divmod(rem, 60)
+            if hours > 0:
+                self.eta_var.set(f"ETA: {hours}h {minutes}m {seconds}s")
+            elif minutes > 0:
+                self.eta_var.set(f"ETA: {minutes}m {seconds}s")
+            else:
+                self.eta_var.set(f"ETA: {seconds}s")
+
+        self.update_idletasks()
+        try:
+            self.update()
+        except Exception:
+            pass
 
     def set_stat(self, key: str, value: int) -> None:
         label = key.capitalize()
@@ -588,22 +618,24 @@ def ask_output_parent() -> str:
     return folder or ""
 
 
-def fetch_tile(session: requests.Session, z: int, x: int, y: int, out_path: Path) -> str:
+def fetch_tile(session: requests.Session, z: int, x: int, y: int, out_path: Path) -> Tuple[str, int]:
     if out_path.exists():
-        return "existing"
+        return "existing", 0
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     url = USGS_TILE_URL.format(z=z, x=x, y=y)
+    bytes_written = 0
     try:
         with session.get(url, timeout=30, stream=True) as r:
             if r.status_code == 404:
-                return "missing"
+                return "missing", 0
             r.raise_for_status()
             with open(out_path, "wb") as f:
                 for chunk in r.iter_content(chunk_size=1024 * 64):
                     if chunk:
                         f.write(chunk)
-        return "downloaded"
+                        bytes_written += len(chunk)
+        return "downloaded", bytes_written
     except Exception as e:
         log(f"ERROR downloading z{z}/{x}/{y}: {e}")
         try:
@@ -611,7 +643,7 @@ def fetch_tile(session: requests.Session, z: int, x: int, y: int, out_path: Path
                 out_path.unlink()
         except Exception:
             pass
-        return "failed"
+        return "failed", 0
 
 
 def build_tiles_for_state(rings: List[List[Tuple[float, float]]], zoom: int) -> List[Tuple[int, int]]:
@@ -682,26 +714,45 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
         progress.set_progress(0, total)
         progress.set_status("Starting download...")
 
+        estimated_total_bytes = 0
+        for state_name in state_names:
+            for z in selected_zooms:
+                info = load_zoom_estimates().get(state_name, {}).get(str(z), {})
+                estimated_total_bytes += int(info.get("estimated_bytes", 0))
+
         session = requests.Session()
         session.headers.update({"User-Agent": USER_AGENT})
 
         completed = 0
+        downloaded_bytes = 0
+        started_at = time.time()
+        progress.set_speed_eta(0.0, None)
+
         for state_name, z, x, y, out_path in plan:
             progress.set_status(f"Downloading {state_name} | zoom {z} | x={x} y={y}")
-            result = fetch_tile(session, z, x, y, out_path)
+            result, bytes_written = fetch_tile(session, z, x, y, out_path)
             stats[result] += 1
+            downloaded_bytes += bytes_written
             completed += 1
             progress.set_progress(completed, total)
             for key, value in stats.items():
                 progress.set_stat(key, value)
 
+            elapsed = max(time.time() - started_at, 0.001)
+            speed_bps = downloaded_bytes / elapsed
+            remaining_bytes = max(estimated_total_bytes - downloaded_bytes, 0)
+            eta_seconds = (remaining_bytes / speed_bps) if speed_bps > 0 and remaining_bytes > 0 else 0
+            progress.set_speed_eta(speed_bps, eta_seconds)
+
             if completed % 25 == 0 or result in ("failed", "missing"):
                 log(
                     f"Progress {completed}/{total} | "
                     f"downloaded={stats['downloaded']} existing={stats['existing']} "
-                    f"missing={stats['missing']} failed={stats['failed']}"
+                    f"missing={stats['missing']} failed={stats['failed']} "
+                    f"bytes={downloaded_bytes}"
                 )
 
+        progress.set_speed_eta(speed_bps if 'speed_bps' in locals() else 0.0, 0)
         progress.set_status("Complete")
         log("Download complete")
         log(f"Downloaded: {stats['downloaded']}")
