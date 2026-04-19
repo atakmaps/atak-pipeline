@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import sys
+import os
+import traceback
+from pathlib import Path
+
+BASE = Path(__file__).resolve().parent
+if BASE.exists():
+    sys.path.insert(0, str(BASE))
+
+
+def _configure_frozen_tk() -> None:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        os.environ["TCL_LIBRARY"] = str(Path(sys._MEIPASS) / "_tcl_data")
+        os.environ["TK_LIBRARY"] = str(Path(sys._MEIPASS) / "_tk_data")
+
+
+def main() -> None:
+    try:
+        _configure_frozen_tk()
+        import atak_downloader_finalbuild_win as imagery
+        imagery.main()
+    except Exception as exc:
+        tb = traceback.format_exc()
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("ATAK Pipeline", f"{exc}\n\n{tb}")
+            root.destroy()
+        except Exception:
+            pass
+        raise
+
+if __name__ == "__main__":
+    main()
