@@ -74,6 +74,7 @@ cat > "$LAUNCHER" <<LAUNCHER_EOF
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$ROOT"
+cd "\$ROOT"
 exec "\$ROOT/.venv/bin/python" "\$ROOT/scripts/atak_downloader_finalbuild.py"
 LAUNCHER_EOF
 
@@ -85,8 +86,7 @@ Version=1.0
 Type=Application
 Name=$APP_NAME
 Comment=Launch ATAK Pipeline
-Exec=$LAUNCHER
-Path=$ROOT
+Exec=/bin/bash -lc 'cd \"$ROOT\" && nohup ./run_atak_pipeline.sh >/tmp/atak_pipeline_launcher.log 2>&1 &'
 Terminal=false
 Categories=Utility;
 StartupNotify=true
