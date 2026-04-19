@@ -50,3 +50,12 @@ last_imagery_root.txt
 *.log
 installer-dist/
 atak_pipeline_handoff*.md
+
+# Build artifacts
+dist/
+build/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
