@@ -25,6 +25,7 @@ import tempfile
 import threading
 import time
 import traceback
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
@@ -585,11 +586,11 @@ def show_summary_confirm(selected_states: List[str], selected_zooms: List[int], 
         f"Zooms:\n{', '.join(map(str, selected_zooms))}\n\n"
         f"Estimated size:\n{human_bytes(total_bytes)}\n\n"
         f"Estimated tiles:\n{total_tiles:,}\n\n"
-        f"Continue to choose an output folder?"
+        f"Press OK to continue."
     )
-    answer = messagebox.askyesno(APP_TITLE, msg, parent=root)
+    messagebox.showinfo(APP_TITLE, msg, parent=root)
     root.destroy()
-    return bool(answer)
+    return True
 
 
 def ask_output_parent() -> str:
@@ -726,6 +727,14 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
         completed = 0
         downloaded_bytes = 0
         started_at = time.time()
+        speed_samples = deque(maxlen=10)
+        last_sample_time = started_at
+        last_sample_bytes = 0
+        smoothed_speed_bps = 0.0
+        eta_smoothed = None
+        last_eta_update_time = time.time()
+        tile_time_samples = deque(maxlen=20)
+        last_tile_complete_time = started_at
         progress.set_speed_eta(0.0, None)
 
         for state_name, z, x, y, out_path in plan:
@@ -734,15 +743,69 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
             stats[result] += 1
             downloaded_bytes += bytes_written
             completed += 1
+
+            tile_now = time.time()
+            tile_elapsed = max(tile_now - last_tile_complete_time, 0.001)
+            last_tile_complete_time = tile_now
+            if result in ("downloaded", "existing", "missing", "failed"):
+                tile_time_samples.append(tile_elapsed)
             progress.set_progress(completed, total)
             for key, value in stats.items():
                 progress.set_stat(key, value)
 
-            elapsed = max(time.time() - started_at, 0.001)
-            speed_bps = downloaded_bytes / elapsed
-            remaining_bytes = max(estimated_total_bytes - downloaded_bytes, 0)
-            eta_seconds = (remaining_bytes / speed_bps) if speed_bps > 0 and remaining_bytes > 0 else 0
-            progress.set_speed_eta(speed_bps, eta_seconds)
+            now = time.time()
+            interval = now - last_sample_time
+            bytes_since_last = downloaded_bytes - last_sample_bytes
+
+            if interval >= 0.75 and bytes_since_last >= 0:
+                inst_speed = bytes_since_last / max(interval, 0.001)
+                speed_samples.append(inst_speed)
+                last_sample_time = now
+                last_sample_bytes = downloaded_bytes
+
+            if speed_samples:
+                smoothed_speed_bps = sum(speed_samples) / len(speed_samples)
+            else:
+                elapsed = max(now - started_at, 0.001)
+                smoothed_speed_bps = downloaded_bytes / elapsed
+
+            now_t = time.time()
+
+            # ETA based on a rolling window of recent tile completion times.
+            # This is more stable than cumulative average and won't drift upward forever.
+            if completed >= 8 and total > completed and tile_time_samples:
+                seconds_per_tile = sum(tile_time_samples) / len(tile_time_samples)
+                raw_eta = (seconds_per_tile * (total - completed)) * 1.08
+            elif total > completed:
+                raw_eta = None
+            else:
+                raw_eta = 0
+
+            # Only refresh ETA smoothing once every 2 seconds.
+            if raw_eta is None:
+                eta_to_show = None
+            else:
+                if eta_smoothed is None:
+                    eta_smoothed = raw_eta
+                    last_eta_update_time = now_t
+                elif (now_t - last_eta_update_time) >= 2.0:
+                    alpha = 0.12
+                    proposed_eta = (alpha * raw_eta) + ((1 - alpha) * eta_smoothed)
+
+                    # Prevent unrealistic jumps.
+                    delta_t = now_t - last_eta_update_time
+                    max_drop = delta_t * 1.10
+                    max_rise = delta_t * 6.0
+
+                    lower_bound = max(0, eta_smoothed - max_drop)
+                    upper_bound = eta_smoothed + max_rise
+                    eta_smoothed = min(max(proposed_eta, lower_bound), upper_bound)
+
+                    last_eta_update_time = now_t
+
+                eta_to_show = max(0, eta_smoothed)
+
+            progress.set_speed_eta(smoothed_speed_bps, eta_to_show)
 
             if completed % 25 == 0 or result in ("failed", "missing"):
                 log(
@@ -752,7 +815,7 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
                     f"bytes={downloaded_bytes}"
                 )
 
-        progress.set_speed_eta(speed_bps if 'speed_bps' in locals() else 0.0, 0)
+        progress.set_speed_eta(smoothed_speed_bps if 'smoothed_speed_bps' in locals() else 0.0, 0)
         progress.set_status("Complete")
         log("Download complete")
         log(f"Downloaded: {stats['downloaded']}")
