@@ -61,3 +61,7 @@ __pycache__/
 *.pyc
 *.bak_*
 .last_imagery_root.txt
+.last_pipeline_output_parent.txt
+
+# Local deploy secrets / server URLs (use deploy.env.example as a template)
+deploy.env

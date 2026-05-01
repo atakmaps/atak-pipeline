@@ -4,6 +4,7 @@ from __future__ import annotations
 import queue
 import re
 import shutil
+import subprocess
 import sys
 import os
 import threading
@@ -11,7 +12,7 @@ import traceback
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 import requests
 import tkinter as tk
@@ -22,6 +23,129 @@ APP_TITLE = "ATAK DTED Downloader"
 BASE_URL = "http://31.220.30.74/dted"
 USER_AGENT = "ATAK-DTED-Downloader/1.0"
 LAST_IMAGERY_ROOT_FILE = Path(__file__).resolve().parent / ".last_imagery_root.txt"
+
+
+def _adb_executable() -> str:
+    return shutil.which("adb") or "adb"
+
+
+def _adb_base_cmd() -> List[str]:
+    cmd = [_adb_executable()]
+    serial = os.environ.get("ANDROID_SERIAL", "").strip()
+    if serial:
+        cmd.extend(["-s", serial])
+    return cmd
+
+
+def _find_merged_sqlite(upload_dir: Path) -> Optional[Path]:
+    if not upload_dir.is_dir():
+        return None
+    candidates = sorted(upload_dir.glob("ATAK_SQL*.sqlite"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if candidates:
+        return candidates[0]
+    parent = upload_dir.parent
+    if not parent.is_dir():
+        return None
+    all_sql = sorted(parent.glob("ATAK_Upload_*/ATAK_SQL*.sqlite"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return all_sql[0] if all_sql else None
+
+
+def adb_push_pipeline_outputs(upload_dir: Path, final_dted_zip: Path) -> Tuple[bool, str]:
+    """Push merged imagery SQLite and DTED zip to the device (default /sdcard/atak/imagery and .../DTED)."""
+    sqlite_path = _find_merged_sqlite(upload_dir)
+    if sqlite_path is None:
+        return False, f"No merged ATAK_SQL*.sqlite found (looked in {upload_dir} and sibling upload folders)."
+    if not final_dted_zip.is_file():
+        return False, f"DTED zip not found: {final_dted_zip}"
+
+    root = (os.environ.get("ATAK_DEVICE_FILES_ROOT") or "/sdcard/atak").strip() or "/sdcard/atak"
+    remote_imagery = f"{root.rstrip('/')}/imagery"
+    remote_dted = f"{root.rstrip('/')}/DTED"
+
+    steps: List[List[str]] = [
+        _adb_base_cmd() + ["shell", "mkdir", "-p", remote_imagery, remote_dted],
+        _adb_base_cmd() + ["push", str(sqlite_path), f"{remote_imagery}/"],
+        _adb_base_cmd() + ["push", str(final_dted_zip), f"{remote_dted}/"],
+    ]
+    log_lines: List[str] = []
+    for cmd in steps:
+        log_lines.append(" ".join(cmd))
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
+        except subprocess.TimeoutExpired:
+            return False, "adb timed out during push.\n\n" + "\n".join(log_lines)
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or "").strip()
+            return False, f"{err}\n\n" + "\n".join(log_lines)
+
+    return True, (
+        f"Pushed imagery DB to {remote_imagery}/{sqlite_path.name}\n"
+        f"Pushed DTED archive to {remote_dted}/{final_dted_zip.name}"
+    )
+
+
+ATAK_CIV_PACKAGE = "com.atakmap.app.civ"
+
+
+def adb_restart_atak_civ() -> None:
+    """Force-stop and relaunch ATAK CIv via adb monkey (best-effort)."""
+    steps = [
+        _adb_base_cmd() + ["shell", "am", "force-stop", ATAK_CIV_PACKAGE],
+        _adb_base_cmd() + ["shell", "monkey", "-p", ATAK_CIV_PACKAGE, "1"],
+    ]
+    for cmd in steps:
+        log_line = " ".join(cmd)
+        log(f"Running: {log_line}")
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if proc.returncode != 0:
+                err = (proc.stderr or proc.stdout or "").strip()
+                log(f"adb exit {proc.returncode}: {err}")
+        except subprocess.TimeoutExpired:
+            log("adb command timed out")
+        except Exception as exc:
+            log(f"adb command failed: {exc}")
+
+
+def ask_delete_raw_imagery(parent: tk.Tk, imagery_root: Path, *, dted_complete: bool) -> bool:
+    """True = delete raw imagery, False = keep. Buttons labeled Yes / No."""
+    result: Dict[str, bool] = {"delete": False}
+
+    dlg = tk.Toplevel(parent)
+    dlg.title(APP_TITLE)
+    dlg.transient(parent)
+    dlg.grab_set()
+    dlg.resizable(False, False)
+
+    if dted_complete:
+        lead = (
+            "DTED build succeeded.\n\n"
+            "ATAK only needs the final SQLite and DTED outputs.\n\n"
+        )
+    else:
+        lead = (
+            "The DTED step finished without packages for your selection.\n\n"
+            "You can still delete raw downloaded imagery from this computer to free space.\n\n"
+        )
+    text = lead + f"Delete raw downloaded imagery now?\n\n{imagery_root}"
+    tk.Label(dlg, text=text, justify="left", wraplength=520).pack(padx=16, pady=(16, 8))
+
+    btn_row = tk.Frame(dlg)
+    btn_row.pack(pady=(8, 16))
+
+    def on_yes() -> None:
+        result["delete"] = True
+        dlg.destroy()
+
+    def on_no() -> None:
+        result["delete"] = False
+        dlg.destroy()
+
+    tk.Button(btn_row, text="Yes", width=10, command=on_yes).pack(side="left", padx=6)
+    tk.Button(btn_row, text="No", width=10, command=on_no).pack(side="left", padx=6)
+
+    parent.wait_window(dlg)
+    return result["delete"]
 
 
 STATE_ABBR_TO_NAME = {
@@ -280,6 +404,8 @@ class ProgressWindow(tk.Tk):
         self.closed = False
         self.completion_message = None
         self.error_message = None
+        self.upload_dir: Optional[Path] = None
+        self.final_dted_zip: Optional[Path] = None
 
     def append_log(self, line: str) -> None:
         self.text.insert("end", line)
@@ -485,6 +611,8 @@ def run_download(selected_states: List[str], mode: str, output_parent: Path, pac
         log(f"Missing: {stats['missing']}")
         log(f"Failed: {stats['failed']}")
 
+        progress.upload_dir = upload_dir
+        progress.final_dted_zip = final_zip_path
         progress.completion_message = "DTED build complete."
         try:
             LOGGER.close()
@@ -512,51 +640,55 @@ def pump_gui_logs(window: ProgressWindow) -> None:
         if getattr(window, "completion_message", None):
             msg = window.completion_message
             window.completion_message = None
-            messagebox.showinfo(APP_TITLE, msg)
+            is_full_dted = msg == "DTED build complete."
 
-            upload_dir = None
+            if is_full_dted:
+                ud = getattr(window, "upload_dir", None)
+                fz = getattr(window, "final_dted_zip", None)
+                parts: List[str] = [msg]
+                if ud is not None and fz is not None and ud.is_dir():
+                    ok, detail = adb_push_pipeline_outputs(ud, fz)
+                    parts.extend(("", detail))
+                    if ok:
+                        log("adb push completed successfully")
+                    else:
+                        log(f"adb push failed: {detail}")
+                        parts.extend(
+                            (
+                                "",
+                                "If adb is unavailable or the device is offline, copy the SQLite and DTED "
+                                "files from the upload folder manually.",
+                            )
+                        )
+                messagebox.showinfo(APP_TITLE, "\n".join(parts), parent=window)
+            else:
+                messagebox.showinfo(APP_TITLE, msg, parent=window)
+
+            upload_dir = getattr(window, "upload_dir", None)
             try:
                 if LAST_IMAGERY_ROOT_FILE.exists():
                     imagery_root = Path(LAST_IMAGERY_ROOT_FILE.read_text(encoding="utf-8").strip())
                     if imagery_root.is_dir():
-                        from datetime import datetime
-                        date_str = datetime.now().strftime("%Y%m%d")
-                        upload_dir = imagery_root.parent / f"ATAK_Upload_{date_str}"
-
-                        cleanup = messagebox.askyesno(
-                            APP_TITLE,
-                            "DTED build succeeded.\n\n"
-                            "ATAK only needs the final SQLite and DTED outputs.\n\n"
-                            f"Delete raw downloaded imagery now?\n\n{imagery_root}"
-                        )
+                        cleanup = ask_delete_raw_imagery(window, imagery_root, dted_complete=is_full_dted)
                         if cleanup:
-                            import shutil
                             shutil.rmtree(imagery_root)
                             log(f"Deleted raw imagery folder: {imagery_root}")
                             try:
                                 LAST_IMAGERY_ROOT_FILE.unlink()
                                 log(f"Deleted saved imagery path file: {LAST_IMAGERY_ROOT_FILE}")
-                            except Exception as cleanup_exc:
+                            except OSError as cleanup_exc:
                                 log(f"Warning: saved imagery path file removal failed: {cleanup_exc}")
                         else:
                             log(f"Raw imagery retained: {imagery_root}")
             except Exception as cleanup_exc:
                 log(f"Warning: raw imagery cleanup failed: {cleanup_exc}")
                 try:
-                    messagebox.showwarning(APP_TITLE, f"Raw imagery cleanup failed:\n{cleanup_exc}")
+                    messagebox.showwarning(APP_TITLE, f"Raw imagery cleanup failed:\n{cleanup_exc}", parent=window)
                 except Exception:
                     pass
 
             try:
-
-                messagebox.showinfo(
-                    APP_TITLE,
-                    "Your ATAK imagery and DTED build is complete.\n\n"
-                    "Please copy the .sql and DTED files into your /Downloads folder on your Android device."
-                )
-
                 if upload_dir and upload_dir.exists():
-                    import subprocess, sys, os
                     try:
                         if sys.platform.startswith("linux"):
                             subprocess.Popen(["xdg-open", str(upload_dir)])
@@ -568,6 +700,16 @@ def pump_gui_logs(window: ProgressWindow) -> None:
                         log(f"WARNING: failed to open upload folder: {open_exc}")
             except Exception:
                 pass
+
+            if is_full_dted:
+                adb_restart_atak_civ()
+                messagebox.showinfo(
+                    APP_TITLE,
+                    "Congratulations! Your ATAK build is now complete. "
+                    'If you wish to install additional imagery, run the "ATAK Pipeline" program '
+                    "(Not Device Setup).",
+                    parent=window,
+                )
 
             window.closed = True
             try:

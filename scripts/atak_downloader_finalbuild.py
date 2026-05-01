@@ -344,7 +344,7 @@ class ZoomDialog(tk.Tk):
     def __init__(self, selected_states: List[str], zoom_estimates: Dict[str, Dict[str, Dict[str, int]]]) -> None:
         super().__init__()
         self.title(f"{APP_TITLE} - Select Zoom Levels")
-        self.geometry("780x540")
+        self.geometry("780x580")
         self.resizable(False, False)
 
         self.result: List[int] = []
@@ -365,13 +365,28 @@ class ZoomDialog(tk.Tk):
         state_text = ", ".join(selected_states[:4])
         if len(selected_states) > 4:
             state_text += f", ... ({len(selected_states)} states)"
-        tk.Label(frame, text=f"Selected states: {state_text}", justify="left", fg="gray30").pack(anchor="w", pady=(0, 6))
+        note_wrap = 720
+        tk.Label(
+            frame,
+            text=f"Selected states: {state_text}",
+            justify="left",
+            fg="gray30",
+            wraplength=note_wrap,
+            anchor="w",
+        ).pack(anchor="w", fill="x", pady=(0, 6))
 
         note = (
-            "Estimated storage is loaded instantly from bundled metadata included with this build.\n"
-            "This estimate is approximate and intended for planning disk space before download."
+            "Estimated storage is the raw file size, but will be significantly reduced before "
+            "it is installed on the Android device. You will be able to delete the raw imagery "
+            "files at the completion of this program."
         )
-        tk.Label(frame, text=note, justify="left").pack(anchor="w", pady=(0, 10))
+        tk.Label(
+            frame,
+            text=note,
+            justify="left",
+            wraplength=note_wrap,
+            anchor="w",
+        ).pack(anchor="w", fill="x", pady=(0, 10))
 
         checks = tk.Frame(frame)
         checks.pack(fill="both", expand=True, anchor="w")
@@ -405,7 +420,14 @@ class ZoomDialog(tk.Tk):
             cb.pack(anchor="w")
 
         self.size_var = tk.StringVar(value="Estimated storage for selected zooms: select at least one zoom")
-        tk.Label(frame, textvariable=self.size_var, font=("Arial", 11, "bold")).pack(anchor="w", pady=(8, 10))
+        tk.Label(
+            frame,
+            textvariable=self.size_var,
+            font=("Arial", 11, "bold"),
+            justify="left",
+            wraplength=note_wrap,
+            anchor="w",
+        ).pack(anchor="w", fill="x", pady=(8, 10))
 
         btns = tk.Frame(frame)
         btns.pack(fill="x", pady=(12, 0))
@@ -587,37 +609,75 @@ def show_summary_confirm(selected_states: List[str], selected_zooms: List[int], 
         f"Zooms:\n{', '.join(map(str, selected_zooms))}\n\n"
         f"Estimated size:\n{human_bytes(total_bytes)}\n\n"
         f"Estimated tiles:\n{total_tiles:,}\n\n"
-        f"Press OK to continue."
+        "Select a temporary folder for install on the next screen (defaults to your "
+        "Downloads folder if you have not chosen one before).\n\n"
+        "Press OK to continue."
     )
     messagebox.showinfo(APP_TITLE, msg, parent=root)
     root.destroy()
     return True
 
 
+PIPELINE_OUTPUT_PARENT_FILE = SCRIPT_DIR / ".last_pipeline_output_parent.txt"
+
+
+def default_output_parent() -> Path:
+    if PIPELINE_OUTPUT_PARENT_FILE.is_file():
+        try:
+            p = Path(PIPELINE_OUTPUT_PARENT_FILE.read_text(encoding="utf-8").strip())
+            if p.is_dir():
+                return p
+        except OSError:
+            pass
+    downloads = Path.home() / "Downloads"
+    if downloads.is_dir():
+        return downloads
+    return Path.home()
+
+
+def save_output_parent(parent: Path) -> None:
+    try:
+        PIPELINE_OUTPUT_PARENT_FILE.write_text(str(parent.resolve()), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def ask_output_parent() -> str:
+    initial = default_output_parent()
+    pick_title = "Select a temporary folder for install"
     try:
         if shutil.which("zenity"):
+            # Start in Downloads or last-used folder
+            start_uri = str(initial.resolve()) + "/"
             result = subprocess.run(
                 [
                     "zenity",
                     "--file-selection",
                     "--directory",
-                    "--title=Select output parent folder",
+                    f"--title={pick_title}",
+                    f"--filename={start_uri}",
                 ],
                 capture_output=True,
                 text=True,
             )
             if result.returncode == 0:
-                return result.stdout.strip()
+                folder = result.stdout.strip()
+                if folder:
+                    p = Path(folder)
+                    save_output_parent(p)
+                    return str(p)
             return ""
     except Exception:
         pass
 
     root = tk.Tk()
     root.withdraw()
-    folder = filedialog.askdirectory(title="Select output parent folder")
+    folder = filedialog.askdirectory(title=pick_title, initialdir=str(initial))
     root.destroy()
-    return folder or ""
+    if folder:
+        save_output_parent(Path(folder))
+        return folder
+    return ""
 
 
 

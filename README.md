@@ -2,20 +2,18 @@
 
 Cross-platform ATAK imagery pipeline with simple one-click install.
 
-## Current Stable Release
+## Current stable release (Linux / source)
 
-**Current release:** `v0.2.5`
+**Linux / source release:** `v0.2.9` (this tag on GitHub).
+
+**Windows:** A new Windows packaged build is **not** included in this cycle. **Use Windows release `2.8`** until a newer Windows installer is published.
 
 This release includes:
 
-- finalized Linux installer flow
-- Linux desktop launcher creation after install
-- finalized Linux upload-folder workflow
-- isolated Windows build system under `windows_build/`
-- working Windows EXE flow:
-  - downloader
-  - SQLite builder
-  - DTED downloader
+- **Device setup** (`ATAK Pipeline (device setup)`): USB steps clarified; ATAK + plugin install over ADB; hands off to the map pipeline
+- **Imagery downloader**: temporary install folder defaults to Downloads and remembers last choice; zoom dialog storage note with proper text wrapping
+- **DTED step**: pushes merged SQLite and DTED zip to the device under `/sdcard/atak/imagery` and `/sdcard/atak/DTED` (override with `ATAK_DEVICE_FILES_ROOT`); post-build **Yes/No** raw-imagery cleanup; adb restart of ATAK and completion dialog
+- **Installer**: `deploy.env.example` seed; portable root paths in root launchers
 
 ---
 

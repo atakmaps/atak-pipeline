@@ -4,7 +4,7 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
-ROOT = Path("/home/paul/Desktop/ATAK/pipeline").resolve()
+ROOT = Path(__file__).resolve().parent.parent
 VERSION_FILE = ROOT / "VERSION"
 DIST_DIR = ROOT / "dist"
 
@@ -29,6 +29,12 @@ def read_version() -> str:
         raise ValueError("VERSION file is empty")
     return version
 
+
+def zip_version_label(version: str) -> str:
+    """VERSION may be 'v0.2.9' or '0.2.9'; zip uses a single leading v."""
+    v = version.strip()
+    return v[1:] if v.startswith("v") else v
+
 def should_skip(path: Path) -> bool:
     parts = set(path.parts)
     if parts & EXCLUDE_DIRS:
@@ -39,7 +45,8 @@ def should_skip(path: Path) -> bool:
 
 def build_zip(version: str) -> Path:
     DIST_DIR.mkdir(exist_ok=True)
-    zip_path = DIST_DIR / f"atak-pipeline-v{version}-source.zip"
+    label = zip_version_label(version)
+    zip_path = DIST_DIR / f"atak-pipeline-v{label}-source.zip"
 
     if zip_path.exists():
         zip_path.unlink()
