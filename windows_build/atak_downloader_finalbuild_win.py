@@ -407,7 +407,7 @@ class ZoomDialog(tk.Tk):
     def __init__(self, selected_states: List[str], zoom_estimates: Dict[str, Dict[str, Dict[str, int]]]) -> None:
         super().__init__()
         self.title(f"{APP_TITLE} - Select Zoom Levels")
-        self.geometry("780x740")
+        self.geometry("1040x780")
         self.resizable(False, False)
         self.configure(cursor="arrow")
 
@@ -419,10 +419,10 @@ class ZoomDialog(tk.Tk):
         self._probe_finished = False
         self._download_throughput_bps: Optional[float] = None
 
-        frame = tk.Frame(self, padx=12, pady=12)
+        frame = tk.Frame(self, padx=28, pady=20)
         frame.pack(fill="both", expand=True)
 
-        note_wrap = 720
+        note_wrap = 940
 
         tk.Label(
             frame,
@@ -446,7 +446,7 @@ class ZoomDialog(tk.Tk):
         intro = tk.Text(
             frame,
             height=8,
-            width=92,
+            width=102,
             wrap="word",
             font=("Arial", 12),
             relief="flat",
@@ -537,12 +537,13 @@ class ZoomDialog(tk.Tk):
                 variable=var,
                 anchor="w",
                 justify="left",
+                wraplength=note_wrap,
                 command=lambda zz=z: self._on_zoom_toggle(zz),
             )
-            cb.pack(anchor="w")
+            cb.pack(anchor="w", fill="x")
 
         btns = tk.Frame(frame)
-        btns.pack(fill="x", pady=(12, 0))
+        btns.pack(fill="x", pady=(16, 4), padx=(4, 4))
         tk.Button(btns, text="Back", width=12, command=self.back).pack(side="left", padx=(0, 6))
         tk.Button(btns, text="Select All", width=12, command=self.select_all).pack(side="left", padx=(0, 6))
         tk.Button(btns, text="Clear All", width=12, command=self.clear_all).pack(side="left", padx=(0, 6))
