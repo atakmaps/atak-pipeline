@@ -128,11 +128,16 @@ def human_bytes(num_bytes: int) -> str:
     return f"{int(num_bytes)} B"
 
 
+# Raw estimates size the full-resolution download; on-device ATAK imagery SQLite is typically
+# much smaller than that working-set figure (single packaged DB vs loose tiles + padding).
+DEVICE_INSTALL_BYTES_VS_RAW_ESTIMATE = 0.22
+
+
 def estimate_device_sqlite_bytes(raw_tile_bytes_sum: int) -> int:
-    """Approximate on-device .sqlite size: stored tile bytes plus typical SQLite overhead."""
+    """Approximate on-device imagery DB size vs bundled raw-download estimate (see ratio above)."""
     if raw_tile_bytes_sum <= 0:
         return 0
-    return int(raw_tile_bytes_sum * 1.06)
+    return max(1, int(raw_tile_bytes_sum * DEVICE_INSTALL_BYTES_VS_RAW_ESTIMATE))
 
 
 def load_zoom_estimates() -> Dict[str, Dict[str, Dict[str, int]]]:
@@ -355,7 +360,7 @@ class ZoomDialog(tk.Tk):
     def __init__(self, selected_states: List[str], zoom_estimates: Dict[str, Dict[str, Dict[str, int]]]) -> None:
         super().__init__()
         self.title(f"{APP_TITLE} - Select Zoom Levels")
-        self.geometry("780x640")
+        self.geometry("780x740")
         self.resizable(False, False)
         self.configure(cursor="arrow")
 
@@ -369,6 +374,36 @@ class ZoomDialog(tk.Tk):
         frame.pack(fill="both", expand=True)
 
         note_wrap = 720
+
+        tk.Label(
+            frame,
+            text="Selected states to be installed:",
+            font=("Arial", 11, "bold"),
+            anchor="w",
+        ).pack(anchor="w", pady=(0, 4))
+
+        states_sorted = "\n".join(sorted(selected_states))
+        states_row = tk.Frame(frame)
+        states_row.pack(anchor="w", fill="x", pady=(0, 10))
+        states_scroll = tk.Scrollbar(states_row)
+        states_text = tk.Text(
+            states_row,
+            height=14,
+            width=86,
+            wrap="none",
+            font=("Arial", 10),
+            relief="solid",
+            borderwidth=1,
+            highlightthickness=0,
+            yscrollcommand=states_scroll.set,
+            cursor="arrow",
+        )
+        states_scroll.config(command=states_text.yview)
+        states_text.pack(side="left", fill="x", expand=True)
+        states_scroll.pack(side="right", fill="y")
+        states_text.insert("1.0", states_sorted)
+        states_text.configure(state="disabled")
+
         bg = frame.cget("bg")
         intro = tk.Text(
             frame,
@@ -398,18 +433,6 @@ class ZoomDialog(tk.Tk):
         )
         intro.configure(state="disabled")
         intro.pack(anchor="w", fill="x", pady=(0, 8))
-
-        state_text = ", ".join(selected_states[:4])
-        if len(selected_states) > 4:
-            state_text += f", ... ({len(selected_states)} states)"
-        tk.Label(
-            frame,
-            text=f"Selected states: {state_text}",
-            justify="left",
-            fg="gray30",
-            wraplength=note_wrap,
-            anchor="w",
-        ).pack(anchor="w", fill="x", pady=(0, 8))
 
         self.temp_space_var = tk.StringVar(
             value="Estimated temporary space needed for selected zooms: select at least one zoom"
