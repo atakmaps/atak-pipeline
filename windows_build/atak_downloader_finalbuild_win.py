@@ -34,7 +34,7 @@ import requests
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
-APP_TITLE = "Imagery Downloader"
+APP_TITLE = "ATAK Imagery Downloader"
 
 
 class DownloadCancelled(Exception):
@@ -1185,7 +1185,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    log("Starting Imagery Downloader")
+    log("Starting ATAK Imagery Downloader")
     log(f"Python: {sys.version}")
     log(f"Working directory: {Path.cwd()}")
     log(f"Script directory: {Path(__file__).resolve().parent}")

@@ -30,7 +30,7 @@ def main() -> None:
             root = tk.Tk()
             root.configure(cursor="arrow")
             root.withdraw()
-            messagebox.showerror("Imagery Downloader", f"{exc}\n\n{tb}")
+            messagebox.showerror("ATAK Imagery Downloader", f"{exc}\n\n{tb}")
             root.destroy()
         except Exception:
             pass

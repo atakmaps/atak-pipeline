@@ -2,7 +2,7 @@
 setlocal
 
 echo ========================================
-echo Imagery Downloader installer
+echo ATAK Imagery Downloader installer
 echo ========================================
 echo.
 

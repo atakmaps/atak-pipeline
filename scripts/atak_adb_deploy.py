@@ -558,7 +558,7 @@ class DeployWizard(tk.Tk):
                 text=(
                     "This program is the full install assuming you have not installed ATAK or Imagery. "
                     "The installer will guide you through the process.\n\n"
-                    "If you would like to add additional imagery at a later time, run the Imagery Downloader "
+                    "If you would like to add additional imagery at a later time, run the ATAK Imagery Downloader "
                     "application, as it does not include ATAK installation."
                     + extra
                 )
@@ -843,7 +843,7 @@ class DeployWizard(tk.Tk):
         self._finish_and_launch_downloader()
 
     def _finish_and_launch_downloader(self) -> None:
-        """Start Imagery Downloader without an extra wizard step (avoids a flash of a dummy screen)."""
+        """Start ATAK Imagery Downloader without an extra wizard step (avoids a flash of a dummy screen)."""
         try:
             self.progress.stop()
             self.progress.pack_forget()

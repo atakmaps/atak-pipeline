@@ -844,7 +844,7 @@ def pump_gui_logs(window: ProgressWindow) -> None:
                 messagebox.showinfo(
                     APP_TITLE,
                     "Congratulations! Your ATAK build is now complete. "
-                    'If you wish to install additional imagery, run "Imagery Downloader" '
+                    'If you wish to install additional imagery, run "ATAK Imagery Downloader" '
                     "(not ATAK Device Install).",
                     parent=window,
                 )

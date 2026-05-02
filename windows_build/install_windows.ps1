@@ -4,7 +4,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Root = Split-Path -Parent $ScriptDir
 $VenvDir = Join-Path $Root ".venv"
 $LauncherCmd = Join-Path $Root "run_atak_pipeline.cmd"
-$DesktopLauncher = Join-Path ([Environment]::GetFolderPath("Desktop")) "Imagery Downloader.cmd"
+$DesktopLauncher = Join-Path ([Environment]::GetFolderPath("Desktop")) "ATAK Imagery Downloader.cmd"
 
 Write-Host "[1/5] Using project root: $Root"
 
@@ -57,5 +57,5 @@ Write-Host "Launchers created:"
 Write-Host "  $LauncherCmd"
 Write-Host "  $DesktopLauncher"
 Write-Host ""
-Write-Host "Starting Imagery Downloader..."
+Write-Host "Starting ATAK Imagery Downloader..."
 & $LauncherCmd

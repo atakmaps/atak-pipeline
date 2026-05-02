@@ -4,7 +4,7 @@ Cross-platform ATAK imagery pipeline with simple one-click install.
 
 ## Linux: run `install_linux.sh` first
 
-On Linux, **always run the installer before using the apps**. The file **`install_linux.sh`** in the **project root** (same folder as `README.md`) prepares **both** programs—**ATAK Device Install** and **Imagery Downloader**—and the Python environment they rely on. Skipping it and running the `.py` files by hand will usually fail or miss dependencies.
+On Linux, **always run the installer before using the apps**. The file **`install_linux.sh`** in the **project root** (same folder as `README.md`) prepares **both** programs—**ATAK Device Install** and **ATAK Imagery Downloader**—and the Python environment they rely on. Skipping it and running the `.py` files by hand will usually fail or miss dependencies.
 
 Source repository: `https://github.com/atakmaps/atak-imagery`
 
@@ -41,7 +41,7 @@ The root script runs **`scripts/install_linux.sh`**, which:
 - Writes **`run_atak_pipeline_with_device.sh`** and **`run_atak_pipeline.sh`** in the project root (wrappers that call the correct Python entry points with that venv).
 - Installs **two desktop shortcuts** (under `~/.local/share/applications/` and on `~/Desktop` when it exists):
   - **ATAK Device Install** — USB setup: install ATAK and your plugin on the phone, then continue into the map workflow.
-  - **Imagery Downloader** — download imagery and build packages when the device is already configured.
+  - **ATAK Imagery Downloader** — download imagery and build packages when the device is already configured.
 
 After a successful run, use those desktop entries or the two shell scripts above. You only need to run **`install_linux.sh`** again if you move the tree, recreate the venv, or need to refresh system/Python dependencies.
 
@@ -55,8 +55,8 @@ After a successful run, use those desktop entries or the two shell scripts above
 
 This release includes:
 
-- **ATAK Device Install** (desktop entry): USB steps clarified; ATAK + plugin install over ADB; hands off to Imagery Downloader
-- **Imagery Downloader**: temporary install folder defaults to Downloads and remembers last choice; zoom dialog storage note with proper text wrapping
+- **ATAK Device Install** (desktop entry): USB steps clarified; ATAK + plugin install over ADB; hands off to ATAK Imagery Downloader
+- **ATAK Imagery Downloader**: temporary install folder defaults to Downloads and remembers last choice; zoom dialog storage note with proper text wrapping
 - **DTED step**: pushes merged SQLite and DTED zip to the device under `/sdcard/atak/imagery` and `/sdcard/atak/DTED` (override with `ATAK_DEVICE_FILES_ROOT`); post-build **Yes/No** raw-imagery cleanup; adb restart of ATAK and completion dialog
 - **Installer**: `deploy.env.example` seed; portable root paths in root launchers
 

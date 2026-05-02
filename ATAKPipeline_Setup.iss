@@ -1,4 +1,4 @@
-#define MyAppName "Imagery Downloader"
+#define MyAppName "ATAK Imagery Downloader"
 #define MyAppVersion "0.2.5"
 #define MyAppExeName "ATAKPipeline.exe"
 
@@ -23,4 +23,4 @@ Name: "{userprograms}\{#MyAppName}"; Filename: "{app}\ATAKPipeline.exe"; Working
 Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\ATAKPipeline.exe"; WorkingDir: "{app}"
 
 [Run]
-Filename: "{app}\ATAKPipeline.exe"; Description: "Launch Imagery Downloader"; Flags: nowait postinstall
+Filename: "{app}\ATAKPipeline.exe"; Description: "Launch ATAK Imagery Downloader"; Flags: nowait postinstall
