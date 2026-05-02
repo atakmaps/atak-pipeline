@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import json
-import math
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 import requests
+
+from imagery_tile_selection import STATE_BOUNDARY_BUFFER_MILES, build_tiles_for_state
 
 STATE_GEOJSON_URL = "https://eric.clst.org/assets/wiki/uploads/Stuff/gz_2010_us_040_00_500k.json"
 USER_AGENT = "ATAK-Ortho-ZoomEstimate-Builder/1.0"
@@ -32,38 +33,6 @@ AVG_TILE_SIZE = {
 
 def log(msg: str) -> None:
     print(msg, flush=True)
-
-
-def lonlat_to_tile(lon: float, lat: float, zoom: int) -> Tuple[int, int]:
-    lat = max(min(lat, 85.05112878), -85.05112878)
-    n = 2.0 ** zoom
-    xtile = int((lon + 180.0) / 360.0 * n)
-    lat_rad = math.radians(lat)
-    ytile = int((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
-    xtile = max(0, min(int(n) - 1, xtile))
-    ytile = max(0, min(int(n) - 1, ytile))
-    return xtile, ytile
-
-
-def polygon_area_deg2(ring: List[Tuple[float, float]]) -> float:
-    if len(ring) < 3:
-        return 0.0
-    area = 0.0
-    for i in range(len(ring)):
-        x1, y1 = ring[i]
-        x2, y2 = ring[(i + 1) % len(ring)]
-        area += x1 * y2 - x2 * y1
-    return abs(area) / 2.0
-
-
-def bbox_for_rings(rings: List[List[Tuple[float, float]]]) -> Tuple[float, float, float, float]:
-    xs = []
-    ys = []
-    for ring in rings:
-        for x, y in ring:
-            xs.append(x)
-            ys.append(y)
-    return min(xs), min(ys), max(xs), max(ys)
 
 
 def download_state_geojson() -> None:
@@ -102,28 +71,16 @@ def load_states() -> Dict[str, List[List[Tuple[float, float]]]]:
     return states
 
 
-def estimate_tile_count(rings: List[List[Tuple[float, float]]], zoom: int) -> int:
-    min_lon, min_lat, max_lon, max_lat = bbox_for_rings(rings)
-    min_x, max_y = lonlat_to_tile(min_lon, min_lat, zoom)
-    max_x, min_y = lonlat_to_tile(max_lon, max_lat, zoom)
-    bbox_tile_count = (abs(max_x - min_x) + 1) * (abs(max_y - min_y) + 1)
-
-    bbox_area = max((max_lon - min_lon) * (max_lat - min_lat), 1e-9)
-    poly_area = sum(polygon_area_deg2(ring) for ring in rings)
-    fill_ratio = max(0.15, min(1.0, poly_area / bbox_area))
-
-    return max(1, int(round(bbox_tile_count * fill_ratio)))
-
-
 def main() -> int:
     download_state_geojson()
     states = load_states()
 
     payload: Dict[str, object] = {
-        "version": 1,
+        "version": 2,
         "generated_utc": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         "zoom_min": 10,
         "zoom_max": 16,
+        "boundary_buffer_miles": STATE_BOUNDARY_BUFFER_MILES,
         "avg_tile_size_bytes": AVG_TILE_SIZE,
         "states": {},
     }
@@ -134,7 +91,7 @@ def main() -> int:
         rings = states[state_name]
         per_zoom: Dict[str, Dict[str, int]] = {}
         for z in range(10, 17):
-            tile_count = estimate_tile_count(rings, z)
+            tile_count = len(build_tiles_for_state(rings, z))
             est_bytes = tile_count * AVG_TILE_SIZE[z]
             per_zoom[str(z)] = {
                 "estimated_tiles": tile_count,

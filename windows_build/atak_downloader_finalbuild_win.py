@@ -14,6 +14,7 @@ Output structure:
     <selected parent>/Imagery/State/zoom/x/y.jpg
 """
 
+import importlib.util
 import json
 import math
 import os
@@ -53,6 +54,28 @@ else:
 DATA_DIR = BUNDLED_SCRIPT_DIR / "data"
 ZOOM_ESTIMATE_PATH = DATA_DIR / "zoom_estimates_z10_z16.json"
 LAST_IMAGERY_ROOT_FILE = RUNTIME_STATE_DIR / ".last_imagery_root.txt"
+
+
+def _load_imagery_tile_selection():
+    paths: List[Path] = []
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        paths.append(Path(sys._MEIPASS) / "scripts" / "imagery_tile_selection.py")
+    here = Path(__file__).resolve().parent
+    paths.extend([here / "imagery_tile_selection.py", here.parent / "scripts" / "imagery_tile_selection.py"])
+    for path in paths:
+        if path.is_file():
+            spec = importlib.util.spec_from_file_location("imagery_tile_selection", path)
+            mod = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(mod)
+            return mod
+    raise ImportError("imagery_tile_selection.py not found (bundle next to downloader or under scripts/)")
+
+
+_its = _load_imagery_tile_selection()
+lonlat_to_tile = _its.lonlat_to_tile
+build_tiles_for_state = _its.build_tiles_for_state
+STATE_BOUNDARY_BUFFER_MILES = _its.STATE_BOUNDARY_BUFFER_MILES
 
 # -----------------------------
 # Logging
@@ -166,17 +189,6 @@ def load_zoom_estimates() -> Dict[str, Dict[str, Dict[str, int]]]:
 # -----------------------------
 # Tile math
 # -----------------------------
-
-def lonlat_to_tile(lon: float, lat: float, zoom: int) -> Tuple[int, int]:
-    lat = max(min(lat, 85.05112878), -85.05112878)
-    n = 2.0 ** zoom
-    xtile = int((lon + 180.0) / 360.0 * n)
-    lat_rad = math.radians(lat)
-    ytile = int((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
-    xtile = max(0, min(int(n) - 1, xtile))
-    ytile = max(0, min(int(n) - 1, ytile))
-    return xtile, ytile
-
 
 def zoom_resolution_labels(z: int, latitude_deg: float = 39.0) -> str:
     equator_mpp = 156543.03392804097 / (2 ** z)
@@ -318,46 +330,6 @@ def load_states(geojson_path: Path) -> Dict[str, List[List[Tuple[float, float]]]
             states[name] = rings
     return states
 
-
-def bbox_for_rings(rings: List[List[Tuple[float, float]]]) -> Tuple[float, float, float, float]:
-    xs = []
-    ys = []
-    for ring in rings:
-        for x, y in ring:
-            xs.append(x)
-            ys.append(y)
-    return min(xs), min(ys), max(xs), max(ys)
-
-# -----------------------------
-# Geometry helpers
-# -----------------------------
-
-def point_in_ring(x: float, y: float, ring: List[Tuple[float, float]]) -> bool:
-    inside = False
-    n = len(ring)
-    if n < 3:
-        return False
-    x1, y1 = ring[0]
-    for i in range(1, n + 1):
-        x2, y2 = ring[i % n]
-        if ((y1 > y) != (y2 > y)):
-            xinters = (x2 - x1) * (y - y1) / ((y2 - y1) or 1e-12) + x1
-            if x < xinters:
-                inside = not inside
-        x1, y1 = x2, y2
-    return inside
-
-
-def point_in_state(lon: float, lat: float, rings: List[List[Tuple[float, float]]]) -> bool:
-    return any(point_in_ring(lon, lat, ring) for ring in rings)
-
-
-def tile_center_lonlat(x: int, y: int, z: int) -> Tuple[float, float]:
-    n = 2.0 ** z
-    lon_deg = (x + 0.5) / n * 360.0 - 180.0
-    lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * ((y + 0.5) / n))))
-    lat_deg = math.degrees(lat_rad)
-    return lon_deg, lat_deg
 
 # -----------------------------
 # UI
@@ -869,23 +841,6 @@ def fetch_tile(session: requests.Session, z: int, x: int, y: int, out_path: Path
         return "failed"
 
 
-def build_tiles_for_state(rings: List[List[Tuple[float, float]]], zoom: int) -> List[Tuple[int, int]]:
-    min_lon, min_lat, max_lon, max_lat = bbox_for_rings(rings)
-    min_x, max_y = lonlat_to_tile(min_lon, min_lat, zoom)
-    max_x, min_y = lonlat_to_tile(max_lon, max_lat, zoom)
-
-    x_start, x_end = sorted((min_x, max_x))
-    y_start, y_end = sorted((min_y, max_y))
-
-    tiles = []
-    for x in range(x_start, x_end + 1):
-        for y in range(y_start, y_end + 1):
-            lon, lat = tile_center_lonlat(x, y, zoom)
-            if point_in_state(lon, lat, rings):
-                tiles.append((x, y))
-    return tiles
-
-
 def run_download(selected_zooms: List[int], selected_states: List[str], mode: str, output_parent: Path, progress: ProgressWindow) -> None:
     temp_dir = Path(tempfile.mkdtemp(prefix="atak_states_"))
     stats = {"downloaded": 0, "existing": 0, "failed": 0, "missing": 0}
@@ -918,6 +873,10 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
         log(f"Using output root: {output_root}")
         log(f"Using upload folder: {upload_dir}")
         log(f"Saved imagery path file: {LAST_IMAGERY_ROOT_FILE}")
+        log(
+            f"Tile coverage: GeoJSON boundaries + {STATE_BOUNDARY_BUFFER_MILES:g} mi edge buffer "
+            "(tile center inside polygon or within buffer of boundary)"
+        )
         log(f"Selected states: {', '.join(state_names)}")
 
         plan: List[Tuple[str, int, int, int, Path]] = []
