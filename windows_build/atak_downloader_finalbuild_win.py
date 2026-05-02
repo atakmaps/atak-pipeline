@@ -23,7 +23,6 @@ from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 import shutil
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import traceback
@@ -42,7 +41,6 @@ class DownloadCancelled(Exception):
     """Raised when the user stops the download from the progress window."""
 
 
-STATE_GEOJSON_URL = "https://eric.clst.org/assets/wiki/uploads/Stuff/gz_2010_us_040_00_500k.json"
 USGS_TILE_URL = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}"
 USER_AGENT = "ATAK-Ortho-Downloader/1.1"
 # Parallel tile fetches (thread pool + throughput probe burst). Match Linux script.
@@ -68,6 +66,7 @@ else:
 
 DATA_DIR = BUNDLED_SCRIPT_DIR / "data"
 ZOOM_ESTIMATE_PATH = DATA_DIR / "zoom_estimates_z10_z16.json"
+STATE_GEOJSON_PATH = DATA_DIR / "us_states.geojson"
 LAST_IMAGERY_ROOT_FILE = RUNTIME_STATE_DIR / ".last_imagery_root.txt"
 
 
@@ -307,17 +306,15 @@ STATE_ABBR_TO_NAME = {
 }
 
 
-def download_state_geojson(temp_dir: Path) -> Path:
-    out_path = temp_dir / "us_states.geojson"
-    log(f"Downloading state boundaries: {STATE_GEOJSON_URL}")
-    with requests.get(STATE_GEOJSON_URL, stream=True, timeout=60, headers={"User-Agent": USER_AGENT}) as r:
-        r.raise_for_status()
-        with open(out_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1024 * 64):
-                if chunk:
-                    f.write(chunk)
-    log(f"Saved state boundaries to {out_path}")
-    return out_path
+def bundled_state_geojson_path() -> Path:
+    """Census 2010 state boundaries shipped under data/ (no network fetch)."""
+    if not STATE_GEOJSON_PATH.is_file():
+        raise FileNotFoundError(
+            f"Missing state boundaries file:\n{STATE_GEOJSON_PATH}\n\n"
+            f"Ensure data/us_states.geojson is present next to zoom estimates."
+        )
+    log(f"Using bundled state boundaries: {STATE_GEOJSON_PATH}")
+    return STATE_GEOJSON_PATH
 
 
 def load_states(geojson_path: Path) -> Dict[str, List[List[Tuple[float, float]]]]:
@@ -918,15 +915,13 @@ def fetch_tile(z: int, x: int, y: int, out_path: Path) -> Tuple[str, int]:
 
 
 def run_download(selected_zooms: List[int], selected_states: List[str], mode: str, output_parent: Path, progress: ProgressWindow) -> None:
-    temp_dir = Path(tempfile.mkdtemp(prefix="atak_states_"))
     stats = {"downloaded": 0, "existing": 0, "failed": 0, "missing": 0}
     executor: Optional[ThreadPoolExecutor] = None
 
     try:
         progress.wait_if_paused()
-        progress.set_status("Downloading state boundaries...")
-        geojson_path = download_state_geojson(temp_dir)
         progress.set_status("Loading state boundaries...")
+        geojson_path = bundled_state_geojson_path()
         states = load_states(geojson_path)
 
         state_names = []
@@ -1079,12 +1074,6 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
         log(f"ERROR: {e}")
         log(tb)
         progress.error_message = f"Error:\n{e}\n\nLog file:\n{LOGGER.log_file}"
-    finally:
-        try:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            log(f"Deleted temp directory: {temp_dir}")
-        except Exception as e:
-            log(f"Warning: failed to delete temp directory: {e}")
 
 
 def pump_gui_logs(window: ProgressWindow) -> None:
