@@ -45,6 +45,10 @@ Configuration (environment variables):
 Server operators can host the manifest next to the ATAK APK and update
 atak_version / atak_apk_url whenever you publish a new build; the POST to
 ATAK_DEPLOY_REPORT_URL records what was installed on each device.
+
+DEBUG — REMOVE BEFORE RELEASE:
+  DeployWizard shows a temporary “Skip (debug)” control on the Installing ATAK step
+  to bypass APK download/install while testing later wizard steps.
 """
 
 from __future__ import annotations
@@ -470,6 +474,7 @@ class DeployWizard(tk.Tk):
         self._manifest_cache: Optional[Dict[str, Any]] = None
         self._atak_version_value = ""
         self._plugin_report_label = ""
+        self._debug_skip_atak_install = False
 
         outer = tk.Frame(self, padx=16, pady=16)
         outer.configure(cursor="arrow")
@@ -508,6 +513,13 @@ class DeployWizard(tk.Tk):
         self.btn_primary.pack(side="right", padx=(8, 0))
         self.btn_secondary = tk.Button(btn_row, text="Quit", width=10, command=self.destroy)
         self.btn_secondary.pack(side="right")
+        # DEBUG: remove Skip (debug) before release — see module docstring.
+        self.btn_skip_debug = tk.Button(
+            btn_row,
+            text="Skip (debug)",
+            command=self._debug_skip_atak_install,
+            fg="darkred",
+        )
 
         self._step = 0
         self._render_step()
@@ -530,6 +542,7 @@ class DeployWizard(tk.Tk):
     def _render_step(self) -> None:
         self.progress.stop()
         self.progress.pack_forget()
+        self.btn_skip_debug.pack_forget()
 
         if self._step == 0:
             self._show_body_label()
@@ -573,6 +586,7 @@ class DeployWizard(tk.Tk):
                 text="Downloading the ATAK build from your server and installing it with adb."
             )
             self.progress.pack(fill="x", pady=(0, 8))
+            self.btn_skip_debug.pack(side="left", padx=(0, 8))
             self.btn_primary.configure(state="disabled", text="Working…")
             self._begin_install_atak()
 
@@ -722,7 +736,32 @@ class DeployWizard(tk.Tk):
 
         threading.Thread(target=work, daemon=True).start()
 
+    def _debug_skip_atak_install(self) -> None:
+        """Bypass ATAK APK download/install for local wizard debugging. REMOVE before release."""
+        log("DEBUG: Skip (debug) — bypassing ATAK download/install")
+        self._debug_skip_atak_install = True
+        try:
+            self.progress.stop()
+        except Exception:
+            pass
+        if not self._atak_version_value:
+            self._atak_version_value = "debug-skip"
+        if not self._manifest_cache and self.manifest_url:
+            try:
+                self._manifest_cache = fetch_manifest(self.manifest_url)
+            except Exception as exc:
+                log(f"DEBUG skip: could not prefetch manifest (plugin step may fetch later): {exc}")
+        self._advance(3)
+
     def _after_install_atak(self, err: Optional[Exception]) -> None:
+        if self._debug_skip_atak_install:
+            self._debug_skip_atak_install = False
+            try:
+                self.progress.stop()
+            except Exception:
+                pass
+            return
+
         if err:
             self.progress.stop()
             self._step = 0
