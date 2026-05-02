@@ -47,9 +47,9 @@ atak_version / atak_apk_url whenever you publish a new build; the POST to
 ATAK_DEPLOY_REPORT_URL records what was installed on each device.
 
 DEBUG — REMOVE BEFORE RELEASE (do not ship; remove before pushing a release):
-  DeployWizard shows temporary “Skip (debug)” controls on the Installing ATAK and
-  Installing plugin steps to bypass those APK installs while testing the rest of the wizard
-  (_on_debug_skip_atak_install, _on_debug_skip_plugin_install).
+  DeployWizard shows one temporary “Skip (debug)” button on the Installing ATAK and
+  Installing plugin steps (same widget position; command switches) to bypass those APK installs
+  while testing the rest of the wizard (_on_debug_skip_atak_install, _on_debug_skip_plugin_install).
 """
 
 from __future__ import annotations
@@ -515,19 +515,8 @@ class DeployWizard(tk.Tk):
         self.btn_primary.pack(side="right", padx=(8, 0))
         self.btn_secondary = tk.Button(btn_row, text="Quit", width=10, command=self.destroy)
         self.btn_secondary.pack(side="right")
-        # DEBUG: remove both Skip (debug) buttons before release — see module docstring.
-        self.btn_skip_debug = tk.Button(
-            btn_row,
-            text="Skip (debug)",
-            command=self._on_debug_skip_atak_install,
-            fg="darkred",
-        )
-        self.btn_skip_debug_plugin = tk.Button(
-            btn_row,
-            text="Skip (debug)",
-            command=self._on_debug_skip_plugin_install,
-            fg="darkred",
-        )
+        # DEBUG: remove Skip (debug) before release — see module docstring.
+        self.btn_skip_debug = tk.Button(btn_row, text="Skip (debug)", fg="darkred")
 
         self._step = 0
         self._render_step()
@@ -551,7 +540,6 @@ class DeployWizard(tk.Tk):
         self.progress.stop()
         self.progress.pack_forget()
         self.btn_skip_debug.pack_forget()
-        self.btn_skip_debug_plugin.pack_forget()
 
         if self._step == 0:
             self._show_body_label()
@@ -595,6 +583,7 @@ class DeployWizard(tk.Tk):
                 text="Downloading the ATAK build from your server and installing it with adb."
             )
             self.progress.pack(fill="x", pady=(0, 8))
+            self.btn_skip_debug.configure(command=self._on_debug_skip_atak_install)
             self.btn_skip_debug.pack(side="left", padx=(0, 8))
             self.btn_primary.configure(state="disabled", text="Working…")
             self._begin_install_atak()
@@ -610,7 +599,8 @@ class DeployWizard(tk.Tk):
             self.step_label.configure(text="Installing plugin")
             self.body.configure(text="Installing the ATAK plugin from your build.")
             self.progress.pack(fill="x", pady=(0, 8))
-            self.btn_skip_debug_plugin.pack(side="left", padx=(0, 8))
+            self.btn_skip_debug.configure(command=self._on_debug_skip_plugin_install)
+            self.btn_skip_debug.pack(side="left", padx=(0, 8))
             self.btn_primary.configure(state="disabled", text="Working…")
             self._begin_install_plugin()
 
