@@ -3,7 +3,7 @@
 ATAK USGS Orthophoto Downloader
 - State selection first
 - Zoom selection second
-- Estimated storage shown on zoom screen from bundled metadata
+- Zoom screen: temporary (raw) vs on-device SQLite estimates from bundled metadata
 - Summary confirmation before output folder picker
 - Zenity folder picker on Linux with Tk fallback
 - Progress bar during download
@@ -124,6 +124,13 @@ def human_bytes(num_bytes: int) -> str:
             return f"{value:.1f} {unit}"
         value /= 1024.0
     return f"{int(num_bytes)} B"
+
+
+def estimate_device_sqlite_bytes(raw_tile_bytes_sum: int) -> int:
+    """Approximate on-device .sqlite size: stored tile bytes plus typical SQLite overhead."""
+    if raw_tile_bytes_sum <= 0:
+        return 0
+    return int(raw_tile_bytes_sum * 1.06)
 
 
 def load_zoom_estimates() -> Dict[str, Dict[str, Dict[str, int]]]:
@@ -346,7 +353,7 @@ class ZoomDialog(tk.Tk):
     def __init__(self, selected_states: List[str], zoom_estimates: Dict[str, Dict[str, Dict[str, int]]]) -> None:
         super().__init__()
         self.title(f"{APP_TITLE} - Select Zoom Levels")
-        self.geometry("780x580")
+        self.geometry("780x640")
         self.resizable(False, False)
         self.configure(cursor="arrow")
 
@@ -359,16 +366,38 @@ class ZoomDialog(tk.Tk):
         frame = tk.Frame(self, padx=12, pady=12)
         frame.pack(fill="both", expand=True)
 
-        tk.Label(
+        note_wrap = 720
+        bg = frame.cget("bg")
+        intro = tk.Text(
             frame,
-            text="Select the imagery resolutions you want to download:",
-            font=("Arial", 11, "bold")
-        ).pack(anchor="w", pady=(0, 8))
+            height=7,
+            width=92,
+            wrap="word",
+            font=("Arial", 10),
+            relief="flat",
+            padx=0,
+            pady=0,
+            highlightthickness=0,
+            borderwidth=0,
+            bg=bg,
+            cursor="arrow",
+        )
+        intro.tag_configure("title", font=("Arial", 11, "bold"))
+        intro.tag_configure("bold", font=("Arial", 10, "bold"))
+        intro.insert("end", "Select the zoom levels (resolution) to download.\n\n", "title")
+        intro.insert("end", "NOTE:", "bold")
+        intro.insert(
+            "end",
+            " This is the RAW image size only, it will not take up this much space on your Android device. "
+            "Ensure you have enough hard drive space to contain this imagery. "
+            "You will be able to remove the raw imagery later once compiled and installed on your device.",
+        )
+        intro.configure(state="disabled")
+        intro.pack(anchor="w", fill="x", pady=(0, 8))
 
         state_text = ", ".join(selected_states[:4])
         if len(selected_states) > 4:
             state_text += f", ... ({len(selected_states)} states)"
-        note_wrap = 720
         tk.Label(
             frame,
             text=f"Selected states: {state_text}",
@@ -376,23 +405,24 @@ class ZoomDialog(tk.Tk):
             fg="gray30",
             wraplength=note_wrap,
             anchor="w",
-        ).pack(anchor="w", fill="x", pady=(0, 6))
+        ).pack(anchor="w", fill="x", pady=(0, 8))
 
-        note = (
-            "Estimated storage is the raw file size, but will be significantly reduced before "
-            "it is installed on the Android device. You will be able to delete the raw imagery "
-            "files at the completion of this program."
+        self.temp_space_var = tk.StringVar(
+            value="Estimated temporary space needed for selected zooms: select at least one zoom"
         )
         tk.Label(
             frame,
-            text=note,
+            textvariable=self.temp_space_var,
+            font=("Arial", 11, "bold"),
             justify="left",
             wraplength=note_wrap,
             anchor="w",
-        ).pack(anchor="w", fill="x", pady=(0, 10))
+        ).pack(anchor="w", fill="x", pady=(0, 8))
 
-        checks = tk.Frame(frame)
-        checks.pack(fill="both", expand=True, anchor="w")
+        mid = tk.Frame(frame)
+        mid.pack(fill="both", expand=True)
+        checks = tk.Frame(mid)
+        checks.place(relx=0.5, rely=0.5, anchor="center")
 
         for z in range(10, 17):
             total_tiles = 0
@@ -422,10 +452,12 @@ class ZoomDialog(tk.Tk):
             )
             cb.pack(anchor="w")
 
-        self.size_var = tk.StringVar(value="Estimated storage for selected zooms: select at least one zoom")
+        self.device_var = tk.StringVar(
+            value="Estimated space to be installed on device: select at least one zoom"
+        )
         tk.Label(
             frame,
-            textvariable=self.size_var,
+            textvariable=self.device_var,
             font=("Arial", 11, "bold"),
             justify="left",
             wraplength=note_wrap,
@@ -458,12 +490,22 @@ class ZoomDialog(tk.Tk):
     def update_size_label(self) -> None:
         selected = [z for z, var in self.vars.items() if var.get()]
         if not selected:
-            self.size_var.set("Estimated storage for selected zooms: select at least one zoom")
+            self.temp_space_var.set(
+                "Estimated temporary space needed for selected zooms: select at least one zoom"
+            )
+            self.device_var.set(
+                "Estimated space to be installed on device: select at least one zoom"
+            )
             return
         total_bytes = sum(self.zoom_total_bytes[z] for z in selected)
         total_tiles = sum(self.zoom_total_tiles[z] for z in selected)
-        self.size_var.set(
-            f"Estimated storage for selected zooms: {human_bytes(total_bytes)}   |   estimated tiles: {total_tiles:,}"
+        device_bytes = estimate_device_sqlite_bytes(total_bytes)
+        self.temp_space_var.set(
+            f"Estimated temporary space needed for selected zooms: {human_bytes(total_bytes)}   |   "
+            f"estimated tiles: {total_tiles:,}"
+        )
+        self.device_var.set(
+            f"Estimated space to be installed on device: {human_bytes(device_bytes)}"
         )
 
     def back(self) -> None:
