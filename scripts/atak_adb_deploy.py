@@ -486,7 +486,6 @@ class DeployWizard(tk.Tk):
         self.step_label.pack(fill="x", pady=(0, 8))
 
         self.body = tk.Label(outer, text="", justify="left", anchor="w", wraplength=500)
-        self.body.pack(fill="both", expand=True, pady=(0, 12))
 
         self._instructions_outer = tk.Frame(outer)
         self._setup_scroll = scrolledtext.ScrolledText(
@@ -499,24 +498,29 @@ class DeployWizard(tk.Tk):
         self._setup_scroll.pack(fill="both", expand=True)
         self._setup_scroll.configure(cursor="arrow")
 
-        self.progress = ttk.Progressbar(outer, mode="indeterminate")
+        # Bottom strip: buttons directly above progress (same for ATAK install, plugin install, etc.)
+        self.footer = tk.Frame(outer)
+        self.btn_row = tk.Frame(self.footer)
+        self.btn_primary = tk.Button(self.btn_row, text="Continue", width=14, command=self._on_primary)
+        self.btn_primary.pack(side="right", padx=(8, 0))
+        self.btn_secondary = tk.Button(self.btn_row, text="Quit", width=10, command=self.destroy)
+        self.btn_secondary.pack(side="right")
+        # DEBUG: remove Skip (debug) before release — see module docstring.
+        self.btn_skip_debug = tk.Button(self.btn_row, text="Skip (debug)", fg="darkred")
+
+        self.progress = ttk.Progressbar(self.footer, mode="indeterminate")
         try:
             self.progress.configure(cursor="arrow")
         except tk.TclError:
             pass
-        self.progress.pack(fill="x", pady=(0, 8))
 
-        self.status = tk.Label(outer, text="", anchor="w", justify="left", fg="gray25")
-        self.status.pack(fill="x", pady=(0, 8))
+        self.status = tk.Label(self.footer, text="", anchor="w", justify="left", fg="gray25")
 
-        btn_row = tk.Frame(outer)
-        btn_row.pack(fill="x")
-        self.btn_primary = tk.Button(btn_row, text="Continue", width=14, command=self._on_primary)
-        self.btn_primary.pack(side="right", padx=(8, 0))
-        self.btn_secondary = tk.Button(btn_row, text="Quit", width=10, command=self.destroy)
-        self.btn_secondary.pack(side="right")
-        # DEBUG: remove Skip (debug) before release — see module docstring.
-        self.btn_skip_debug = tk.Button(btn_row, text="Skip (debug)", fg="darkred")
+        self.body.pack(fill="both", expand=True, pady=(0, 12))
+        self.btn_row.pack(fill="x")
+        self.progress.pack(fill="x", pady=(8, 0))
+        self.status.pack(fill="x", pady=(4, 0))
+        self.footer.pack(fill="x", pady=(12, 0))
 
         self._step = 0
         self._render_step()
@@ -526,11 +530,11 @@ class DeployWizard(tk.Tk):
 
     def _show_body_label(self) -> None:
         self._instructions_outer.pack_forget()
-        self.body.pack(fill="both", expand=True, pady=(0, 12))
+        self.body.pack(fill="both", expand=True, pady=(0, 12), before=self.footer)
 
     def _show_setup_instructions_panel(self) -> None:
         self.body.pack_forget()
-        self._instructions_outer.pack(fill="both", expand=True, pady=(0, 12))
+        self._instructions_outer.pack(fill="both", expand=True, pady=(0, 12), before=self.footer)
         self._setup_scroll.configure(state="normal")
         self._setup_scroll.delete("1.0", tk.END)
         self._setup_scroll.insert("1.0", ATAK_POST_INSTALL_SETUP_INSTRUCTIONS)
@@ -582,7 +586,7 @@ class DeployWizard(tk.Tk):
             self.body.configure(
                 text="Downloading the ATAK build from your server and installing it with adb."
             )
-            self.progress.pack(fill="x", pady=(0, 8))
+            self.progress.pack(fill="x", pady=(8, 0), before=self.status)
             self.btn_skip_debug.configure(command=self._on_debug_skip_atak_install)
             self.btn_skip_debug.pack(side="left", padx=(0, 8))
             self.btn_primary.configure(state="disabled", text="Working…")
@@ -598,7 +602,7 @@ class DeployWizard(tk.Tk):
             self._show_body_label()
             self.step_label.configure(text="Installing plugin")
             self.body.configure(text="Installing the ATAK plugin from your build.")
-            self.progress.pack(fill="x", pady=(0, 8))
+            self.progress.pack(fill="x", pady=(8, 0), before=self.status)
             self.btn_skip_debug.configure(command=self._on_debug_skip_plugin_install)
             self.btn_skip_debug.pack(side="left", padx=(0, 8))
             self.btn_primary.configure(state="disabled", text="Working…")
