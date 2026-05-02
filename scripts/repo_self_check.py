@@ -39,7 +39,7 @@ for rel in required_root + required_scripts:
 
 duplicates = [f for f in dangerous_duplicates if (ROOT / f).exists()]
 
-print("ATAK repo self-check")
+print("ATAK Imagery repo self-check")
 print("=" * 40)
 
 if missing:

@@ -54,7 +54,7 @@ def build():
 
     copy_structure(win_dir, WINDOWS_FILES)
 
-    win_zip = DIST / "atak-pipeline-windows.zip"
+    win_zip = DIST / "atak-imagery-windows.zip"
     make_zip(win_dir, win_zip)
     shutil.rmtree(win_dir)
 
@@ -66,7 +66,7 @@ def build():
 
     copy_structure(lin_dir, LINUX_FILES)
 
-    lin_zip = DIST / "atak-pipeline-linux.zip"
+    lin_zip = DIST / "atak-imagery-linux.zip"
     make_zip(lin_dir, lin_zip)
     shutil.rmtree(lin_dir)
 

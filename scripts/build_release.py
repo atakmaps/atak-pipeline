@@ -63,7 +63,7 @@ def should_skip(path: Path) -> bool:
 def build_zip(version: str) -> Path:
     DIST_DIR.mkdir(exist_ok=True)
     label = zip_version_label(version)
-    zip_path = DIST_DIR / f"atak-pipeline-v{label}-source.zip"
+    zip_path = DIST_DIR / f"atak-imagery-v{label}-source.zip"
 
     if zip_path.exists():
         zip_path.unlink()
@@ -78,7 +78,7 @@ def build_zip(version: str) -> Path:
                 continue
 
             rel_path = item.relative_to(ROOT)
-            arcname = Path("atak-pipeline") / rel_path
+            arcname = Path("atak-imagery") / rel_path
             zf.write(item, arcname.as_posix())
 
     return zip_path

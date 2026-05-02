@@ -202,7 +202,7 @@ echo "Desktop launchers: \"$DESKTOP_FILE_NAME\" (imagery) and \"$DESKTOP_FILE_NA
 
 if command -v zenity >/dev/null 2>&1; then
     zenity --info \
-        --title="ATAK Pipeline installer" \
+        --title="ATAK Imagery installer" \
         --text="Installation complete. Nothing was started automatically.\n\nThe first time, open:\n\n• ATAK Device Install\n  — USB install of ATAK and your plugin, then the map tools.\n\nLater, for more imagery on a device that already has ATAK:\n\n• Imagery Downloader\n  — download maps and build packages only." \
         --width=480 >/dev/null 2>&1 || true
 fi

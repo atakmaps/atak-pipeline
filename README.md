@@ -1,4 +1,4 @@
-# ATAK Pipeline
+# ATAK Imagery
 
 Cross-platform ATAK imagery pipeline with simple one-click install.
 
@@ -6,13 +6,15 @@ Cross-platform ATAK imagery pipeline with simple one-click install.
 
 On Linux, **always run the installer before using the apps**. The file **`install_linux.sh`** in the **project root** (same folder as `README.md`) prepares **both** programs—**ATAK Device Install** and **Imagery Downloader**—and the Python environment they rely on. Skipping it and running the `.py` files by hand will usually fail or miss dependencies.
 
+Source repository: `https://github.com/atakmaps/atak-imagery`
+
 ### How to run the installer
 
 1. Put the project on your machine (clone the repo or extract a release zip) and open a **terminal**.
 2. Change to the project root, the directory that contains `install_linux.sh`:
 
    ```bash
-   cd /path/to/atak-pipeline
+   cd /path/to/atak-imagery
    ```
 
 3. If the script is not marked executable, run:
