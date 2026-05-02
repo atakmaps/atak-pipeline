@@ -474,7 +474,7 @@ class ZoomDialog(tk.Tk):
                 variable=var,
                 anchor="w",
                 justify="left",
-                command=self.update_size_label,
+                command=lambda zz=z: self._on_zoom_toggle(zz),
             )
             cb.pack(anchor="w")
 
@@ -499,6 +499,13 @@ class ZoomDialog(tk.Tk):
     def clear_all(self) -> None:
         for v in self.vars.values():
             v.set(False)
+        self.update_size_label()
+
+    def _on_zoom_toggle(self, z: int) -> None:
+        """Checking a zoom level selects that level and every coarser level below it (10…z)."""
+        if self.vars[z].get():
+            for zz in range(10, z + 1):
+                self.vars[zz].set(True)
         self.update_size_label()
 
     def update_size_label(self) -> None:
