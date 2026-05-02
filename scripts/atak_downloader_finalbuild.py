@@ -615,8 +615,7 @@ class ZoomDialog(tk.Tk):
                 )
             else:
                 self.download_time_var.set(
-                    f"{time_prefix} select zoom levels for an estimate "
-                    f"(recent sample {human_throughput(self._download_throughput_bps)})"
+                    f"{time_prefix} select zoom levels for an estimate."
                 )
             return
         total_bytes = sum(self.zoom_total_bytes[z] for z in selected)
@@ -637,9 +636,8 @@ class ZoomDialog(tk.Tk):
             )
         else:
             eta_sec = total_bytes / self._download_throughput_bps
-            rate_s = human_throughput(self._download_throughput_bps)
             self.download_time_var.set(
-                f"{time_prefix} {format_download_eta(eta_sec)} (recent sample {rate_s})"
+                f"{time_prefix} {format_download_eta(eta_sec)}"
             )
 
     def back(self) -> None:
