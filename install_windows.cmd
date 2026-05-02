@@ -2,7 +2,7 @@
 setlocal
 
 echo ========================================
-echo ATAK Pipeline Installer
+echo Imagery Downloader installer
 echo ========================================
 echo.
 

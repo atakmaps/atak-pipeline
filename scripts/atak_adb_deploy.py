@@ -72,7 +72,7 @@ except Exception:  # pragma: no cover
     scrolledtext = None
     ttk = None
 
-APP_TITLE = "ATAK device setup"
+APP_TITLE = "ATAK Device Install"
 DEFAULT_ATAK_PACKAGE = "com.atakmap.app.civ"
 
 # After ATAK APK is installed: show this while the user completes first-run on device.
@@ -573,7 +573,7 @@ class DeployWizard(tk.Tk):
             self._show_body_label()
             self.step_label.configure(text="Starting pipeline")
             self.body.configure(
-                text="Device setup is complete. The imagery downloader will start next."
+                text="Device install is complete. Imagery Downloader will start next."
             )
             self.btn_primary.pack_forget()
             self.after(400, self._launch_downloader)

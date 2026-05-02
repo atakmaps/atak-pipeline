@@ -1,4 +1,4 @@
-#define MyAppName "ATAK Pipeline"
+#define MyAppName "Imagery Downloader"
 #define MyAppVersion "0.2.5"
 #define MyAppExeName "ATAKPipeline.exe"
 
@@ -18,9 +18,9 @@ PrivilegesRequired=lowest
 Source: "dist\{#MyAppExeName}"; DestDir: "{app}"
 
 [Icons]
-Name: "{group}\ATAK Pipeline"; Filename: "{app}\ATAKPipeline.exe"; WorkingDir: "{app}"
-Name: "{userprograms}\ATAK Pipeline"; Filename: "{app}\ATAKPipeline.exe"; WorkingDir: "{app}"
-Name: "{userdesktop}\ATAK Pipeline"; Filename: "{app}\ATAKPipeline.exe"; WorkingDir: "{app}"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\ATAKPipeline.exe"; WorkingDir: "{app}"
+Name: "{userprograms}\{#MyAppName}"; Filename: "{app}\ATAKPipeline.exe"; WorkingDir: "{app}"
+Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\ATAKPipeline.exe"; WorkingDir: "{app}"
 
 [Run]
-Filename: "{app}\ATAKPipeline.exe"; Description: "Launch ATAK Pipeline"; Flags: nowait postinstall
+Filename: "{app}\ATAKPipeline.exe"; Description: "Launch Imagery Downloader"; Flags: nowait postinstall

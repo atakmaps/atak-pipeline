@@ -32,7 +32,7 @@ import requests
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
-APP_TITLE = "ATAK Ortho Downloader"
+APP_TITLE = "Imagery Downloader"
 STATE_GEOJSON_URL = "https://eric.clst.org/assets/wiki/uploads/Stuff/gz_2010_us_040_00_500k.json"
 USGS_TILE_URL = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}"
 USER_AGENT = "ATAK-Ortho-Downloader/1.1"
@@ -829,7 +829,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    log("Starting ATAK Ortho Downloader")
+    log("Starting Imagery Downloader")
     log(f"Python: {sys.version}")
     log(f"Working directory: {Path.cwd()}")
     log(f"Script directory: {Path(__file__).resolve().parent}")

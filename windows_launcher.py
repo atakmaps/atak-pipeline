@@ -30,7 +30,7 @@ def main() -> None:
             from tkinter import messagebox
             root = tk.Tk()
             root.withdraw()
-            messagebox.showerror("ATAK Pipeline", f"{exc}\n\n{tb}")
+            messagebox.showerror("Imagery Downloader", f"{exc}\n\n{tb}")
             root.destroy()
         except Exception:
             pass
