@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="/home/paul/Documents/ATAK/pipeline"
 cd "$ROOT"
 export PATH="/usr/local/bin:/usr/bin:/bin${PATH:+:$PATH}"
 if [ -d "$HOME/Android/Sdk/platform-tools" ]; then
