@@ -270,6 +270,7 @@ class StateSelectionDialog(tk.Tk):
         self.geometry("620x700")
         self.minsize(620, 700)
         self.resizable(False, False)
+        self.configure(cursor="arrow")
 
         self.result_mode = ""
         self.result_states: List[str] = []
@@ -301,6 +302,7 @@ class StateSelectionDialog(tk.Tk):
         canvas.configure(yscrollcommand=scrollbar.set)
 
         canvas.pack(side="left", fill="both", expand=True)
+        canvas.configure(cursor="arrow")
         scrollbar.pack(side="right", fill="y")
 
         self.vars: Dict[str, tk.BooleanVar] = {}
@@ -348,6 +350,7 @@ class ZoomDialog(tk.Tk):
         self.title(f"{APP_TITLE} - Select Zoom Levels")
         self.geometry("780x540")
         self.resizable(False, False)
+        self.configure(cursor="arrow")
 
         self.result: List[int] = []
         self.go_back = False
@@ -466,6 +469,7 @@ class ProgressWindow(tk.Tk):
         super().__init__()
         self.title(f"{APP_TITLE} - Progress")
         self.geometry("860x560")
+        self.configure(cursor="arrow")
 
         top = tk.Frame(self, padx=10, pady=10)
         top.pack(fill="x")
@@ -479,6 +483,7 @@ class ProgressWindow(tk.Tk):
         tk.Label(top, textvariable=self.detail_var, fg="gray30").pack(anchor="w", pady=(4, 8))
 
         self.canvas = tk.Canvas(top, height=24, bg="white", highlightthickness=1, highlightbackground="gray70")
+        self.canvas.configure(cursor="arrow")
         self.canvas.pack(fill="x")
         self.bar = self.canvas.create_rectangle(0, 0, 0, 24, fill="#4a90e2", width=0)
         self.bar_text = self.canvas.create_text(5, 12, anchor="w", text="0%")
@@ -551,6 +556,7 @@ class ProgressWindow(tk.Tk):
 
 def show_summary_confirm(selected_states: List[str], selected_zooms: List[int], total_bytes: int, total_tiles: int) -> bool:
     root = tk.Tk()
+    root.configure(cursor="arrow")
     root.withdraw()
     state_summary = ", ".join(selected_states[:6])
     if len(selected_states) > 6:
@@ -587,6 +593,7 @@ def ask_output_parent() -> str:
         pass
 
     root = tk.Tk()
+    root.configure(cursor="arrow")
     root.withdraw()
     folder = filedialog.askdirectory(title="Select output parent folder")
     root.destroy()

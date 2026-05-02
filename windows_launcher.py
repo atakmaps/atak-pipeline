@@ -29,6 +29,7 @@ def main() -> None:
             import tkinter as tk
             from tkinter import messagebox
             root = tk.Tk()
+            root.configure(cursor="arrow")
             root.withdraw()
             messagebox.showerror("Imagery Downloader", f"{exc}\n\n{tb}")
             root.destroy()

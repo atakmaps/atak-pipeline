@@ -113,6 +113,7 @@ def ask_delete_raw_imagery(parent: tk.Tk, imagery_root: Path, *, dted_complete: 
 
     dlg = tk.Toplevel(parent)
     dlg.title(APP_TITLE)
+    dlg.configure(cursor="arrow")
     dlg.transient(parent)
     dlg.grab_set()
     dlg.resizable(False, False)
@@ -242,6 +243,7 @@ def state_url(state_name: str) -> str:
 
 def ask_output_parent() -> str:
     root = tk.Tk()
+    root.configure(cursor="arrow")
     root.withdraw()
     folder = filedialog.askdirectory(title="Select output parent folder")
     root.destroy()
@@ -250,6 +252,7 @@ def ask_output_parent() -> str:
 
 def ask_package_name(default_name: str) -> str:
     root = tk.Tk()
+    root.configure(cursor="arrow")
     root.withdraw()
     value = simpledialog.askstring(
         APP_TITLE,
@@ -268,6 +271,7 @@ class StateSelectionDialog(tk.Tk):
         self.geometry("620x700")
         self.minsize(620, 700)
         self.resizable(False, False)
+        self.configure(cursor="arrow")
 
         self.result_mode = ""
         self.result_states: List[str] = []
@@ -306,6 +310,7 @@ class StateSelectionDialog(tk.Tk):
         canvas.configure(yscrollcommand=scrollbar.set)
 
         canvas.pack(side="left", fill="both", expand=True)
+        canvas.configure(cursor="arrow")
         scrollbar.pack(side="right", fill="y")
 
         self.vars: Dict[str, tk.BooleanVar] = {}
@@ -361,6 +366,7 @@ class ProgressWindow(tk.Tk):
         super().__init__()
         self.title(f"{APP_TITLE} - Progress")
         self.geometry("860x560")
+        self.configure(cursor="arrow")
 
         top = tk.Frame(self, padx=10, pady=10)
         top.pack(fill="x")
@@ -374,6 +380,7 @@ class ProgressWindow(tk.Tk):
         tk.Label(top, textvariable=self.detail_var, fg="gray30").pack(anchor="w", pady=(4, 8))
 
         self.canvas = tk.Canvas(top, height=24, bg="white", highlightthickness=1, highlightbackground="gray70")
+        self.canvas.configure(cursor="arrow")
         self.canvas.pack(fill="x")
         self.bar = self.canvas.create_rectangle(0, 0, 0, 24, fill="#4a90e2", width=0)
         self.bar_text = self.canvas.create_text(5, 12, anchor="w", text="0%")

@@ -378,6 +378,7 @@ class App:
         self.root.title("ATAK Imagery SQLite Builder")
         self.root.geometry("980x700")
         self.root.minsize(820, 560)
+        self.root.configure(cursor="arrow")
 
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.logger: Optional[logging.Logger] = None

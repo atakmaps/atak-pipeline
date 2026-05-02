@@ -459,8 +459,9 @@ class DeployWizard(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(APP_TITLE)
-        self.geometry("560x420")
-        self.minsize(520, 380)
+        self.geometry("560x520")
+        self.minsize(520, 420)
+        self.configure(cursor="arrow")
         self.selected_serial: Optional[str] = None
         self.manifest_url = env_optional("ATAK_DEPLOY_MANIFEST_URL")
         self.report_url = env_optional("ATAK_DEPLOY_REPORT_URL")
@@ -471,6 +472,7 @@ class DeployWizard(tk.Tk):
         self._plugin_report_label = ""
 
         outer = tk.Frame(self, padx=16, pady=16)
+        outer.configure(cursor="arrow")
         outer.pack(fill="both", expand=True)
 
         self.step_label = tk.Label(outer, text="", font=("Arial", 12, "bold"), anchor="w", justify="left")
@@ -488,8 +490,13 @@ class DeployWizard(tk.Tk):
             font=("Arial", 10),
         )
         self._setup_scroll.pack(fill="both", expand=True)
+        self._setup_scroll.configure(cursor="arrow")
 
         self.progress = ttk.Progressbar(outer, mode="indeterminate")
+        try:
+            self.progress.configure(cursor="arrow")
+        except tk.TclError:
+            pass
         self.progress.pack(fill="x", pady=(0, 8))
 
         self.status = tk.Label(outer, text="", anchor="w", justify="left", fg="gray25")
@@ -526,26 +533,40 @@ class DeployWizard(tk.Tk):
 
         if self._step == 0:
             self._show_body_label()
-            self.step_label.configure(text="Connect your Android device")
+            self.step_label.configure(text="")
             extra = ""
             if not self.manifest_url:
                 extra = (
-                    f"\nSet ATAK_DEPLOY_MANIFEST_URL in:\n{DEPLOY_ENV_PATH}\n"
+                    f"\n\nSet ATAK_DEPLOY_MANIFEST_URL in:\n{DEPLOY_ENV_PATH}\n"
                     "(uncomment the line or add your URL), then run this again.\n"
                 )
+            self.body.configure(
+                text=(
+                    "This program is the full install assuming you have not installed ATAK or Imagery. "
+                    "The installer will guide you through the process.\n\n"
+                    "If you would like to add additional imagery at a later time, run the Imagery Downloader "
+                    "application, as it does not include ATAK installation."
+                    + extra
+                )
+            )
+            self.btn_primary.configure(text="Continue", command=lambda: self._advance(1))
+            self.status.configure(text="")
+
+        elif self._step == 1:
+            self._show_body_label()
+            self.step_label.configure(text="Connect your Android device")
             self.body.configure(
                 text=(
                     "1. On the phone, enable Developer options and USB debugging.\n"
                     "2. Connect USB\n"
                     "3. Select USB Mode, File Transfer\n\n"
                     "Click Continue to verify that adb sees your device."
-                    + extra
                 )
             )
-            self.btn_primary.configure(text="Continue", command=self._step_connect_check)
+            self.btn_primary.configure(state="normal", text="Continue", command=self._step_connect_check)
             self.status.configure(text="")
 
-        elif self._step == 1:
+        elif self._step == 2:
             self._show_body_label()
             self.step_label.configure(text="Installing ATAK")
             self.body.configure(
@@ -555,13 +576,13 @@ class DeployWizard(tk.Tk):
             self.btn_primary.configure(state="disabled", text="Working…")
             self._begin_install_atak()
 
-        elif self._step == 2:
+        elif self._step == 3:
             self._show_setup_instructions_panel()
             self.step_label.configure(text="Complete ATAK setup on device")
-            self.btn_primary.configure(state="normal", text="Continue", command=lambda: self._advance(3))
+            self.btn_primary.configure(state="normal", text="Continue", command=lambda: self._advance(4))
             self.status.configure(text="")
 
-        elif self._step == 3:
+        elif self._step == 4:
             self._show_body_label()
             self.step_label.configure(text="Installing plugin")
             self.body.configure(text="Installing the ATAK plugin from your build.")
@@ -569,7 +590,7 @@ class DeployWizard(tk.Tk):
             self.btn_primary.configure(state="disabled", text="Working…")
             self._begin_install_plugin()
 
-        elif self._step == 4:
+        elif self._step == 5:
             self._show_body_label()
             self.step_label.configure(text="Starting pipeline")
             self.body.configure(
@@ -621,11 +642,12 @@ class DeployWizard(tk.Tk):
 
         self.selected_serial = serial
         os.environ["ANDROID_SERIAL"] = serial
-        self._advance(1)
+        self._advance(2)
 
     def _ask_serial_choice(self, devices: List[str]) -> Optional[str]:
         top = tk.Toplevel(self)
         top.title("Select device")
+        top.configure(cursor="arrow")
         top.transient(self)
         top.grab_set()
         choice: List[Optional[str]] = [None]
@@ -712,7 +734,7 @@ class DeployWizard(tk.Tk):
             launch_atak(self.selected_serial or "")
         except Exception:
             log("launch_atak after ATAK install failed (user can open ATAK manually)")
-        self._advance(2)
+        self._advance(3)
 
     def _begin_install_plugin(self) -> None:
         ser = self.selected_serial or ""
@@ -760,11 +782,11 @@ class DeployWizard(tk.Tk):
         if err:
             self._cleanup_temp_apks()
             messagebox.showerror(APP_TITLE, f"Could not install plugin:\n{err}")
-            self._step = 2
+            self._step = 3
             self._render_step()
             return
         self._cleanup_temp_apks()
-        self._advance(4)
+        self._advance(5)
 
     def _launch_downloader(self) -> None:
         try:
