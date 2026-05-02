@@ -40,8 +40,6 @@ STATE_GEOJSON_URL = "https://eric.clst.org/assets/wiki/uploads/Stuff/gz_2010_us_
 USGS_TILE_URL = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}"
 USER_AGENT = "ATAK-Ortho-Downloader/1.1"
 MAX_DOWNLOAD_WORKERS = 12
-# Single-connection samples rarely scale linearly; dampen when extrapolating to all workers.
-DOWNLOAD_PROBE_PARALLEL_EFFICIENCY = 0.82
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     SCRIPT_DIR = Path(sys._MEIPASS) / "scripts"
 else:
@@ -186,33 +184,45 @@ def format_download_eta(seconds: float) -> str:
 
 
 def measure_usgs_imagery_effective_bps() -> Optional[float]:
-    """Sample USGS Imagery tiles and estimate aggregate bytes/sec with MAX_DOWNLOAD_WORKERS."""
-    session = requests.Session()
-    session.headers.update({"User-Agent": USER_AGENT})
+    """Measure aggregate USGS tile bytes/sec using concurrent downloads (same worker count as downloader)."""
     z = 12
     lon0, lat0 = -98.35, 39.12
     x0, y0 = lonlat_to_tile(lon0, lat0, z)
-    samples: List[float] = []
-    for dx, dy in ((0, 0), (1, 0)):
+    urls: List[str] = []
+    for i in range(MAX_DOWNLOAD_WORKERS):
+        dx = i % 4
+        dy = i // 4
         x, y = x0 + dx, y0 + dy
-        url = USGS_TILE_URL.format(z=z, y=y, x=x)
-        t0 = time.perf_counter()
+        urls.append(USGS_TILE_URL.format(z=z, y=y, x=x))
+
+    def fetch_one(url: str) -> int:
+        sess = requests.Session()
+        sess.headers.update({"User-Agent": USER_AGENT})
         nbytes = 0
         try:
-            with session.get(url, timeout=25, stream=True) as r:
+            with sess.get(url, timeout=35, stream=True) as r:
                 r.raise_for_status()
                 for chunk in r.iter_content(chunk_size=65536):
                     if chunk:
                         nbytes += len(chunk)
-            elapsed = time.perf_counter() - t0
-            if elapsed >= 0.05 and nbytes >= 256:
-                samples.append(nbytes / elapsed)
         except Exception as e:
-            log(f"Imagery connection test tile z{z} x{x} y{y}: {e}")
-    if not samples:
+            log(f"Imagery throughput probe: {e}")
+            return 0
+        return nbytes
+
+    t0 = time.perf_counter()
+    try:
+        with ThreadPoolExecutor(max_workers=MAX_DOWNLOAD_WORKERS) as pool:
+            parts = list(pool.map(fetch_one, urls))
+    except Exception as e:
+        log(f"Imagery throughput probe pool: {e}")
         return None
-    single_bps = sum(samples) / len(samples)
-    return single_bps * MAX_DOWNLOAD_WORKERS * DOWNLOAD_PROBE_PARALLEL_EFFICIENCY
+    elapsed = time.perf_counter() - t0
+    total_bytes = sum(parts)
+    successes = sum(1 for p in parts if p >= 512)
+    if successes < max(4, MAX_DOWNLOAD_WORKERS // 2) or elapsed < 0.08 or total_bytes < 4096:
+        return None
+    return total_bytes / elapsed
 
 
 # -----------------------------
@@ -606,10 +616,7 @@ class ZoomDialog(tk.Tk):
                     f"{time_prefix} could not measure speed (server unreachable or blocked)"
                 )
             else:
-                self.download_time_var.set(
-                    f"{time_prefix} select zoom levels for an estimate "
-                    f"(uses up to {MAX_DOWNLOAD_WORKERS} parallel downloads)"
-                )
+                self.download_time_var.set(f"{time_prefix} select zoom levels for an estimate")
             return
         total_bytes = sum(self.zoom_total_bytes[z] for z in selected)
         total_tiles = sum(self.zoom_total_tiles[z] for z in selected)
@@ -629,10 +636,7 @@ class ZoomDialog(tk.Tk):
             )
         else:
             eta_sec = total_bytes / self._download_throughput_bps
-            self.download_time_var.set(
-                f"{time_prefix} {format_download_eta(eta_sec)} "
-                f"(approx., {MAX_DOWNLOAD_WORKERS} parallel downloads)"
-            )
+            self.download_time_var.set(f"{time_prefix} {format_download_eta(eta_sec)}")
 
     def back(self) -> None:
         self.go_back = True
