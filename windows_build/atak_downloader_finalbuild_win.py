@@ -3,7 +3,7 @@
 ATAK USGS Orthophoto Downloader
 - State selection first
 - Zoom selection second
-- Zoom screen: temporary (raw) vs on-device SQLite estimates from bundled metadata
+- Zoom screen: storage estimates, background USGS throughput probe, ETA vs selection
 - Summary confirmation before output folder picker
 - Zenity folder picker on Linux with Tk fallback
 - Progress bar during download
@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -36,6 +37,8 @@ APP_TITLE = "Imagery Downloader"
 STATE_GEOJSON_URL = "https://eric.clst.org/assets/wiki/uploads/Stuff/gz_2010_us_040_00_500k.json"
 USGS_TILE_URL = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}"
 USER_AGENT = "ATAK-Ortho-Downloader/1.1"
+MAX_DOWNLOAD_WORKERS = 12
+DOWNLOAD_PROBE_PARALLEL_EFFICIENCY = 0.82
 
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     BUNDLED_SCRIPT_DIR = Path(sys._MEIPASS) / "scripts"
@@ -170,6 +173,50 @@ def zoom_resolution_labels(z: int, latitude_deg: float = 39.0) -> str:
     local_mpp = equator_mpp * math.cos(math.radians(latitude_deg))
     local_ft = local_mpp * 3.28084
     return f"Zoom {z}  (~{equator_mpp:.2f} m/px equator, ~{local_ft:.1f} ft/px mid-US)"
+
+
+def format_download_eta(seconds: float) -> str:
+    if seconds <= 0 or math.isnan(seconds) or math.isinf(seconds):
+        return "unknown"
+    if seconds < 120:
+        return f"about {max(1, int(seconds))} seconds"
+    if seconds < 7200:
+        return f"about {seconds / 60:.0f} minutes"
+    hours = seconds / 3600.0
+    if hours >= 72:
+        return f"about {hours / 24:.1f} days"
+    return f"about {hours:.1f} hours"
+
+
+def measure_usgs_imagery_effective_bps() -> Optional[float]:
+    """Sample USGS Imagery tiles and estimate aggregate bytes/sec with MAX_DOWNLOAD_WORKERS."""
+    session = requests.Session()
+    session.headers.update({"User-Agent": USER_AGENT})
+    z = 12
+    lon0, lat0 = -98.35, 39.12
+    x0, y0 = lonlat_to_tile(lon0, lat0, z)
+    samples: List[float] = []
+    for dx, dy in ((0, 0), (1, 0)):
+        x, y = x0 + dx, y0 + dy
+        url = USGS_TILE_URL.format(z=z, y=y, x=x)
+        t0 = time.perf_counter()
+        nbytes = 0
+        try:
+            with session.get(url, timeout=25, stream=True) as r:
+                r.raise_for_status()
+                for chunk in r.iter_content(chunk_size=65536):
+                    if chunk:
+                        nbytes += len(chunk)
+            elapsed = time.perf_counter() - t0
+            if elapsed >= 0.05 and nbytes >= 256:
+                samples.append(nbytes / elapsed)
+        except Exception as e:
+            log(f"Imagery connection test tile z{z} x{x} y{y}: {e}")
+    if not samples:
+        return None
+    single_bps = sum(samples) / len(samples)
+    return single_bps * MAX_DOWNLOAD_WORKERS * DOWNLOAD_PROBE_PARALLEL_EFFICIENCY
+
 
 # -----------------------------
 # State boundaries
@@ -369,6 +416,8 @@ class ZoomDialog(tk.Tk):
         self.zoom_total_bytes: Dict[int, int] = {}
         self.zoom_total_tiles: Dict[int, int] = {}
         self.vars: Dict[int, tk.BooleanVar] = {}
+        self._probe_finished = False
+        self._download_throughput_bps: Optional[float] = None
 
         frame = tk.Frame(self, padx=12, pady=12)
         frame.pack(fill="both", expand=True)
@@ -445,6 +494,18 @@ class ZoomDialog(tk.Tk):
             justify="left",
             wraplength=note_wrap,
             anchor="w",
+        ).pack(anchor="w", fill="x", pady=(0, 4))
+
+        self.download_time_var = tk.StringVar(
+            value="Estimated time for download with your internet connection: measuring…"
+        )
+        tk.Label(
+            frame,
+            textvariable=self.download_time_var,
+            font=("Arial", 11, "bold"),
+            justify="left",
+            wraplength=note_wrap,
+            anchor="w",
         ).pack(anchor="w", fill="x", pady=(0, 16))
 
         mid = tk.Frame(frame)
@@ -493,6 +554,25 @@ class ZoomDialog(tk.Tk):
         self.attributes("-topmost", True)
         self.after(300, lambda: self.attributes("-topmost", False))
 
+        threading.Thread(target=self._throughput_probe_worker, daemon=True).start()
+        self.update_size_label()
+
+    def _throughput_probe_worker(self) -> None:
+        try:
+            bps = measure_usgs_imagery_effective_bps()
+        except Exception as e:
+            log(f"Imagery throughput probe failed: {e}")
+            bps = None
+        self.after(0, lambda b=bps: self._apply_probe_result(b))
+
+    def _apply_probe_result(self, bps: Optional[float]) -> None:
+        self._probe_finished = True
+        self._download_throughput_bps = bps
+        try:
+            self.update_size_label()
+        except tk.TclError:
+            pass
+
     def select_all(self) -> None:
         for v in self.vars.values():
             v.set(True)
@@ -512,6 +592,7 @@ class ZoomDialog(tk.Tk):
 
     def update_size_label(self) -> None:
         selected = [z for z, var in self.vars.items() if var.get()]
+        time_prefix = "Estimated time for download with your internet connection:"
         if not selected:
             self.temp_space_var.set(
                 "Estimated temporary space needed for selected zooms: select at least one zoom"
@@ -519,6 +600,17 @@ class ZoomDialog(tk.Tk):
             self.device_var.set(
                 "Estimated space to be installed on device: select at least one zoom"
             )
+            if not self._probe_finished:
+                self.download_time_var.set(f"{time_prefix} measuring connection to imagery server…")
+            elif self._download_throughput_bps is None:
+                self.download_time_var.set(
+                    f"{time_prefix} could not measure speed (server unreachable or blocked)"
+                )
+            else:
+                self.download_time_var.set(
+                    f"{time_prefix} select zoom levels for an estimate "
+                    f"(uses up to {MAX_DOWNLOAD_WORKERS} parallel downloads)"
+                )
             return
         total_bytes = sum(self.zoom_total_bytes[z] for z in selected)
         total_tiles = sum(self.zoom_total_tiles[z] for z in selected)
@@ -530,6 +622,18 @@ class ZoomDialog(tk.Tk):
         self.device_var.set(
             f"Estimated space to be installed on device: {human_bytes(device_bytes)}"
         )
+        if not self._probe_finished:
+            self.download_time_var.set(f"{time_prefix} measuring connection to imagery server…")
+        elif self._download_throughput_bps is None or self._download_throughput_bps <= 0:
+            self.download_time_var.set(
+                f"{time_prefix} could not measure speed (server unreachable or blocked)"
+            )
+        else:
+            eta_sec = total_bytes / self._download_throughput_bps
+            self.download_time_var.set(
+                f"{time_prefix} {format_download_eta(eta_sec)} "
+                f"(approx., {MAX_DOWNLOAD_WORKERS} parallel downloads)"
+            )
 
     def back(self) -> None:
         self.go_back = True
