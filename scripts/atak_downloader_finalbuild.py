@@ -36,6 +36,12 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 APP_TITLE = "Imagery Downloader"
+
+
+class DownloadCancelled(Exception):
+    """Raised when the user stops the download from the progress window."""
+
+
 STATE_GEOJSON_URL = "https://eric.clst.org/assets/wiki/uploads/Stuff/gz_2010_us_040_00_500k.json"
 USGS_TILE_URL = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}"
 USER_AGENT = "ATAK-Ortho-Downloader/1.1"
@@ -54,6 +60,14 @@ from imagery_tile_selection import (  # noqa: E402
     build_tiles_for_state,
     lonlat_to_tile,
 )
+
+
+def _shutdown_executor_pool(executor: ThreadPoolExecutor) -> None:
+    try:
+        executor.shutdown(wait=False, cancel_futures=True)
+    except TypeError:
+        executor.shutdown(wait=False)
+
 
 # -----------------------------
 # Logging
@@ -686,6 +700,16 @@ class ProgressWindow(tk.Tk):
         for i, key in enumerate(("downloaded", "existing", "failed", "missing")):
             tk.Label(stats, textvariable=self.stats_vars[key], width=18, anchor="w").grid(row=0, column=i, sticky="w")
 
+        ctrl = tk.Frame(self, padx=10)
+        ctrl.pack(fill="x", pady=(0, 4))
+        self._ctl_lock = threading.Lock()
+        self._paused = False
+        self._cancel_requested = False
+        self.user_cancelled = False
+        self.btn_pause = tk.Button(ctrl, text="Pause", width=12, command=self._on_pause_toggle)
+        self.btn_pause.pack(side="left", padx=(0, 8))
+        tk.Button(ctrl, text="Cancel", width=12, command=self._on_cancel_download).pack(side="left")
+
         log_frame = tk.Frame(self, padx=10, pady=10)
         log_frame.pack(fill="both", expand=True)
 
@@ -750,16 +774,54 @@ class ProgressWindow(tk.Tk):
         self.stats_vars[key].set(f"{label}: {value}")
         self.update_idletasks()
 
+    def _on_pause_toggle(self) -> None:
+        with self._ctl_lock:
+            self._paused = not self._paused
+            now_paused = self._paused
+            label = "Resume" if now_paused else "Pause"
+        try:
+            self.btn_pause.configure(text=label)
+            if now_paused:
+                self.set_status("Paused — click Resume to continue")
+        except tk.TclError:
+            pass
+
+    def _on_cancel_download(self) -> None:
+        if not messagebox.askyesno(
+            APP_TITLE,
+            "Stop downloading and exit the program?",
+            parent=self,
+        ):
+            return
+        with self._ctl_lock:
+            self._cancel_requested = True
+
+    def wait_if_paused(self) -> None:
+        while True:
+            with self._ctl_lock:
+                if self._cancel_requested:
+                    raise DownloadCancelled()
+                if not self._paused:
+                    return
+            time.sleep(0.05)
+
     def on_close(self) -> None:
         status = self.status_var.get().strip().lower()
-        is_done = status in {"complete", "completed", "done", "finished"}
-        if is_done:
+        if status in {"complete", "completed", "done", "finished"}:
             self.closed = True
             self.destroy()
             return
-        if messagebox.askyesno(APP_TITLE, "Close the progress window? The download will keep running in the background."):
+        if status == "cancelled":
             self.closed = True
             self.destroy()
+            return
+        if messagebox.askyesno(
+            APP_TITLE,
+            "Stop downloading and exit the program?",
+            parent=self,
+        ):
+            with self._ctl_lock:
+                self._cancel_requested = True
 
 # -----------------------------
 # Workflow helpers
@@ -908,8 +970,10 @@ def fetch_tile(z: int, x: int, y: int, out_path: Path) -> Tuple[str, int]:
 def run_download(selected_zooms: List[int], selected_states: List[str], mode: str, output_parent: Path, progress: ProgressWindow) -> None:
     temp_dir = Path(tempfile.mkdtemp(prefix="atak_states_"))
     stats = {"downloaded": 0, "existing": 0, "failed": 0, "missing": 0}
+    executor: Optional[ThreadPoolExecutor] = None
 
     try:
+        progress.wait_if_paused()
         progress.set_status("Downloading state boundaries...")
         geojson_path = download_state_geojson(temp_dir)
         progress.set_status("Loading state boundaries...")
@@ -946,8 +1010,10 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
         plan: List[Tuple[str, int, int, int, Path]] = []
         progress.set_status("Scanning tile coverage...")
         for state_name in state_names:
+            progress.wait_if_paused()
             rings = states[state_name]
             for z in selected_zooms:
+                progress.wait_if_paused()
                 progress.set_status(f"Scanning {state_name} zoom {z}...")
                 tiles = build_tiles_for_state(rings, z)
                 log(f"Planned {len(tiles)} tiles for {state_name}, zoom {z}")
@@ -990,7 +1056,8 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
         future_to_tile = {}
         plan_iter = iter(plan)
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        try:
             for _ in range(max_workers):
                 try:
                     tile = next(plan_iter)
@@ -1000,6 +1067,7 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
                 future_to_tile[future] = tile
 
             while future_to_tile:
+                progress.wait_if_paused()
                 done, _ = wait(list(future_to_tile.keys()), timeout=0.2, return_when=FIRST_COMPLETED)
                 if not done:
                     continue
@@ -1092,8 +1160,12 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
                         future_to_tile[next_future] = next_tile
                     except StopIteration:
                         pass
+        finally:
+            if executor is not None:
+                _shutdown_executor_pool(executor)
+                executor = None
 
-        progress.set_speed_eta(smoothed_speed_bps if 'smoothed_speed_bps' in locals() else 0.0, 0)
+        progress.set_speed_eta(smoothed_speed_bps if "smoothed_speed_bps" in locals() else 0.0, 0)
         progress.set_status("Complete")
         log("Download complete")
         log(f"Downloaded: {stats['downloaded']}")
@@ -1102,6 +1174,11 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
         log(f"Failed: {stats['failed']}")
         progress.completion_message = "Download complete."
 
+    except DownloadCancelled:
+        log("Download cancelled by user.")
+        progress.user_cancelled = True
+        progress.set_speed_eta(0.0, None)
+        progress.set_status("Cancelled")
     except Exception as e:
         tb = traceback.format_exc()
         log(f"ERROR: {e}")
@@ -1125,6 +1202,14 @@ def pump_gui_logs(window: ProgressWindow) -> None:
         pass
 
     if not getattr(window, "closed", False):
+        if getattr(window, "user_cancelled", False):
+            window.closed = True
+            try:
+                window.destroy()
+            except Exception:
+                pass
+            os._exit(0)
+
         if getattr(window, "completion_message", None):
             msg = window.completion_message
             window.completion_message = None
