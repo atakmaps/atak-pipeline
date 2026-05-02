@@ -12,7 +12,7 @@ import traceback
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import requests
 import tkinter as tk
@@ -23,6 +23,25 @@ APP_TITLE = "ATAK DTED Downloader"
 BASE_URL = "http://31.220.30.74/dted"
 USER_AGENT = "ATAK-DTED-Downloader/1.0"
 LAST_IMAGERY_ROOT_FILE = Path(__file__).resolve().parent / ".last_imagery_root.txt"
+SKIP_STANDALONE_DTED_AFTER_SQLITE = Path(__file__).resolve().parent / ".skip_standalone_dted_after_sqlite"
+
+
+def mark_standalone_dted_skip() -> None:
+    """SQLite builder consumes this to avoid launching the standalone DTED app after inline DTED."""
+    SKIP_STANDALONE_DTED_AFTER_SQLITE.write_text(
+        datetime.now().isoformat(timespec="seconds"), encoding="utf-8"
+    )
+
+
+def consume_standalone_dted_skip() -> bool:
+    """Return True if the skip flag was present (and remove it)."""
+    if not SKIP_STANDALONE_DTED_AFTER_SQLITE.is_file():
+        return False
+    try:
+        SKIP_STANDALONE_DTED_AFTER_SQLITE.unlink()
+    except OSError:
+        pass
+    return True
 
 
 def _adb_executable() -> str:
@@ -462,7 +481,13 @@ def remote_file_size(session: requests.Session, url: str) -> int:
         return 0
 
 
-def download_file(session: requests.Session, url: str, out_path: Path) -> str:
+def download_file(
+    session: requests.Session,
+    url: str,
+    out_path: Path,
+    log_fn: Optional[Callable[[str], None]] = None,
+) -> str:
+    _log = log_fn or log
     size_hint = remote_file_size(session, url)
     if size_hint < 0:
         return "missing"
@@ -485,7 +510,7 @@ def download_file(session: requests.Session, url: str, out_path: Path) -> str:
         tmp_path.replace(out_path)
         return "downloaded"
     except Exception as exc:
-        log(f"ERROR downloading {url}: {exc}")
+        _log(f"ERROR downloading {url}: {exc}")
         try:
             if tmp_path.exists():
                 tmp_path.unlink()
@@ -494,23 +519,33 @@ def download_file(session: requests.Session, url: str, out_path: Path) -> str:
         return "failed"
 
 
-def extract_state_zip(zip_path: Path, extract_root: Path) -> None:
+def extract_state_zip(
+    zip_path: Path,
+    extract_root: Path,
+    log_fn: Optional[Callable[[str], None]] = None,
+) -> None:
+    _log = log_fn or log
     state_name = zip_path.stem
     state_extract_dir = extract_root / state_name
     if state_extract_dir.exists():
         shutil.rmtree(state_extract_dir)
     state_extract_dir.mkdir(parents=True, exist_ok=True)
 
-    log(f"Extracting {zip_path.name} -> {state_extract_dir}")
+    _log(f"Extracting {zip_path.name} -> {state_extract_dir}")
     with zipfile.ZipFile(zip_path, "r") as zf:
         zf.extractall(state_extract_dir)
 
 
-def build_final_dted_zip(extract_root: Path, final_zip_path: Path) -> None:
+def build_final_dted_zip(
+    extract_root: Path,
+    final_zip_path: Path,
+    log_fn: Optional[Callable[[str], None]] = None,
+) -> None:
+    _log = log_fn or log
     if final_zip_path.exists():
         final_zip_path.unlink()
 
-    log(f"Building final ATAK zip: {final_zip_path}")
+    _log(f"Building final ATAK zip: {final_zip_path}")
 
     with zipfile.ZipFile(final_zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=5) as zf:
         for state_dir in sorted(extract_root.iterdir(), key=lambda p: p.name.lower()):
@@ -522,9 +557,105 @@ def build_final_dted_zip(extract_root: Path, final_zip_path: Path) -> None:
                     continue
                 arcname = item.relative_to(state_dir)
                 zf.write(item, arcname.as_posix())
-                log(f"ADD {arcname.as_posix()}")
+                _log(f"ADD {arcname.as_posix()}")
 
-    log(f"Final zip ready: {final_zip_path}")
+    _log(f"Final zip ready: {final_zip_path}")
+
+
+def run_dted_inline_for_states(
+    selected_states: List[str],
+    upload_dir: Path,
+    *,
+    log_sink: Callable[[str], None],
+    progress: object,
+) -> Optional[Path]:
+    """
+    Download DTED state ZIPs for the given states into upload_dir, same server/layout as the DTED app.
+    Uses progress.wait_if_paused / set_status / set_progress / set_stat; optional set_speed_eta cleared when present.
+    Returns path to dted2_*.zip or None if nothing could be produced.
+    """
+    import tempfile
+
+    if not selected_states:
+        log_sink("DTED: no states in selection; skipping.")
+        return None
+
+    stats = {"downloaded": 0, "existing": 0, "failed": 0, "missing": 0}
+    for key in stats:
+        progress.set_stat(key, 0)
+    if hasattr(progress, "set_speed_eta"):
+        progress.set_speed_eta(0.0, None)
+
+    ts = datetime.now().strftime("%H%M%S")
+    temp_root = Path(tempfile.mkdtemp(prefix="atak_dted_inline_"))
+    downloads_dir = temp_root / "_state_zips"
+    extract_root = temp_root / "_extracted_states"
+    final_zip_path = upload_dir / f"dted2_{ts}.zip"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    downloads_dir.mkdir(parents=True, exist_ok=True)
+    extract_root.mkdir(parents=True, exist_ok=True)
+
+    log_sink(f"DTED: using upload folder {upload_dir}")
+    log_sink(f"DTED: temp work folder {temp_root}")
+    log_sink(f"DTED: server base URL {BASE_URL}")
+
+    plan: List[Tuple[str, str, Path]] = []
+    for state_name in selected_states:
+        url = state_url(state_name)
+        out_path = downloads_dir / state_name / f"{state_name}.zip"
+        plan.append((state_name, url, out_path))
+
+    total = len(plan)
+    progress.set_progress(0, total)
+    progress.set_status("DTED: downloading state ZIPs…")
+
+    session = requests.Session()
+    session.headers.update({"User-Agent": USER_AGENT})
+
+    completed = 0
+    try:
+        for state_name, url, out_path in plan:
+            progress.wait_if_paused()
+            progress.set_status(f"DTED: downloading {state_name}")
+            log_sink(f"DTED: requesting {url}")
+            result = download_file(session, url, out_path, log_fn=log_sink)
+            stats[result] += 1
+            completed += 1
+            progress.set_progress(completed, total)
+            for key, value in stats.items():
+                progress.set_stat(key, value)
+            log_sink(f"DTED: {state_name}: {result} ({completed}/{total})")
+
+        if stats["failed"] > 0:
+            raise RuntimeError(
+                f"DTED download incomplete. failed={stats['failed']} missing={stats['missing']}."
+            )
+
+        if stats["missing"] > 0:
+            log_sink(f"DTED: WARNING missing ZIPs: {stats['missing']}")
+
+        progress.set_status("DTED: extracting state ZIPs…")
+        extracted_any = False
+        for state_name, _, out_path in plan:
+            progress.wait_if_paused()
+            if not out_path.exists():
+                log_sink(f"DTED: WARNING skipping missing zip during extraction: {out_path}")
+                continue
+            extract_state_zip(out_path, extract_root, log_fn=log_sink)
+            extracted_any = True
+
+        if not extracted_any:
+            log_sink("DTED: no packages extracted; skipping final zip.")
+            return None
+
+        progress.wait_if_paused()
+        progress.set_status("DTED: building dted2.zip…")
+        build_final_dted_zip(extract_root, final_zip_path, log_fn=log_sink)
+
+        log_sink(f"DTED: complete -> {final_zip_path}")
+        return final_zip_path
+    finally:
+        shutil.rmtree(temp_root, ignore_errors=True)
 
 
 def run_download(selected_states: List[str], mode: str, output_parent: Path, package_name: str, progress: ProgressWindow) -> None:

@@ -1166,13 +1166,34 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
                 executor = None
 
         progress.set_speed_eta(smoothed_speed_bps if "smoothed_speed_bps" in locals() else 0.0, 0)
-        progress.set_status("Complete")
-        log("Download complete")
+        log("Imagery tile download complete")
         log(f"Downloaded: {stats['downloaded']}")
         log(f"Existing: {stats['existing']}")
         log(f"Missing: {stats['missing']}")
         log(f"Failed: {stats['failed']}")
-        progress.completion_message = "Download complete."
+
+        dted_note = ""
+        try:
+            from atak_dted_downloader import mark_standalone_dted_skip, run_dted_inline_for_states
+
+            dted_zip = run_dted_inline_for_states(
+                state_names,
+                upload_dir,
+                log_sink=log,
+                progress=progress,
+            )
+            if dted_zip is not None:
+                mark_standalone_dted_skip()
+                dted_note = f"\n\nDTED archive ready:\n{dted_zip.name}"
+        except ImportError as exc:
+            log(f"DTED: skipped (module not loadable: {exc}).")
+        except DownloadCancelled:
+            raise
+        except Exception as exc:
+            log(f"DTED: failed — {exc}")
+
+        progress.set_status("Complete")
+        progress.completion_message = "Download complete." + dted_note
 
     except DownloadCancelled:
         log("Download cancelled by user.")

@@ -447,6 +447,14 @@ class App:
             try:
                 self.root.destroy()
 
+                try:
+                    import atak_dted_downloader_win as dted_mod
+
+                    if dted_mod.consume_standalone_dted_skip():
+                        sys.exit(0)
+                except ImportError:
+                    pass
+
                 if getattr(sys, "frozen", False):
                     if hasattr(sys, "_MEIPASS"):
                         os.environ["TCL_LIBRARY"] = str(Path(sys._MEIPASS) / "_tcl_data")
