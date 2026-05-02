@@ -19,7 +19,7 @@ import json
 import math
 import os
 import queue
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 import shutil
 import subprocess
 import sys
@@ -45,7 +45,16 @@ class DownloadCancelled(Exception):
 STATE_GEOJSON_URL = "https://eric.clst.org/assets/wiki/uploads/Stuff/gz_2010_us_040_00_500k.json"
 USGS_TILE_URL = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}"
 USER_AGENT = "ATAK-Ortho-Downloader/1.1"
-MAX_DOWNLOAD_WORKERS = 12
+# Parallel tile fetches (thread pool + throughput probe burst). Match Linux script.
+MAX_DOWNLOAD_WORKERS = 24
+
+
+def _shutdown_executor_pool(executor: ThreadPoolExecutor) -> None:
+    try:
+        executor.shutdown(wait=False, cancel_futures=True)
+    except TypeError:
+        executor.shutdown(wait=False)
+
 
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     BUNDLED_SCRIPT_DIR = Path(sys._MEIPASS) / "scripts"
@@ -867,22 +876,37 @@ def ask_output_parent() -> str:
     return folder or ""
 
 
-def fetch_tile(session: requests.Session, z: int, x: int, y: int, out_path: Path) -> str:
+DOWNLOAD_SESSION_LOCAL = threading.local()
+
+
+def get_download_session() -> requests.Session:
+    session = getattr(DOWNLOAD_SESSION_LOCAL, "session", None)
+    if session is None:
+        session = requests.Session()
+        session.headers.update({"User-Agent": USER_AGENT})
+        DOWNLOAD_SESSION_LOCAL.session = session
+    return session
+
+
+def fetch_tile(z: int, x: int, y: int, out_path: Path) -> Tuple[str, int]:
     if out_path.exists():
-        return "existing"
+        return "existing", 0
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     url = USGS_TILE_URL.format(z=z, x=x, y=y)
+    bytes_written = 0
     try:
+        session = get_download_session()
         with session.get(url, timeout=30, stream=True) as r:
             if r.status_code == 404:
-                return "missing"
+                return "missing", 0
             r.raise_for_status()
             with open(out_path, "wb") as f:
                 for chunk in r.iter_content(chunk_size=1024 * 64):
                     if chunk:
                         f.write(chunk)
-        return "downloaded"
+                        bytes_written += len(chunk)
+        return "downloaded", bytes_written
     except Exception as e:
         log(f"ERROR downloading z{z}/{x}/{y}: {e}")
         try:
@@ -890,12 +914,13 @@ def fetch_tile(session: requests.Session, z: int, x: int, y: int, out_path: Path
                 out_path.unlink()
         except Exception:
             pass
-        return "failed"
+        return "failed", 0
 
 
 def run_download(selected_zooms: List[int], selected_states: List[str], mode: str, output_parent: Path, progress: ProgressWindow) -> None:
     temp_dir = Path(tempfile.mkdtemp(prefix="atak_states_"))
     stats = {"downloaded": 0, "existing": 0, "failed": 0, "missing": 0}
+    executor: Optional[ThreadPoolExecutor] = None
 
     try:
         progress.wait_if_paused()
@@ -949,26 +974,72 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
         progress.set_progress(0, total)
         progress.set_status("Starting download...")
 
-        session = requests.Session()
-        session.headers.update({"User-Agent": USER_AGENT})
-
         completed = 0
-        for state_name, z, x, y, out_path in plan:
-            progress.wait_if_paused()
-            progress.set_status(f"Downloading {state_name} | zoom {z} | x={x} y={y}")
-            result = fetch_tile(session, z, x, y, out_path)
-            stats[result] += 1
-            completed += 1
-            progress.set_progress(completed, total)
-            for key, value in stats.items():
-                progress.set_stat(key, value)
+        downloaded_bytes = 0
 
-            if completed % 25 == 0 or result in ("failed", "missing"):
-                log(
-                    f"Progress {completed}/{total} | "
-                    f"downloaded={stats['downloaded']} existing={stats['existing']} "
-                    f"missing={stats['missing']} failed={stats['failed']}"
-                )
+        def download_one(tile: Tuple[str, int, int, int, Path]) -> Tuple[str, int, int, int, str, int]:
+            state_name, z, x, y, out_path = tile
+            result, bytes_written = fetch_tile(z, x, y, out_path)
+            return state_name, z, x, y, result, bytes_written
+
+        max_workers = max(1, min(MAX_DOWNLOAD_WORKERS, total if total > 0 else 1))
+        progress.set_status(f"Starting download with {max_workers} workers...")
+
+        future_to_tile = {}
+        plan_iter = iter(plan)
+
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        try:
+            for _ in range(max_workers):
+                try:
+                    tile = next(plan_iter)
+                except StopIteration:
+                    break
+                future = executor.submit(download_one, tile)
+                future_to_tile[future] = tile
+
+            while future_to_tile:
+                progress.wait_if_paused()
+                done, _ = wait(list(future_to_tile.keys()), timeout=0.2, return_when=FIRST_COMPLETED)
+                if not done:
+                    continue
+
+                for future in done:
+                    tile = future_to_tile.pop(future)
+                    state_name, z, x, y, out_path = tile
+                    progress.set_status(f"Downloading {state_name} | zoom {z} | x={x} y={y}")
+
+                    try:
+                        _, _, _, _, result, bytes_written = future.result()
+                    except Exception as e:
+                        log(f"ERROR downloading tile: {e}")
+                        result, bytes_written = "failed", 0
+
+                    stats[result] += 1
+                    downloaded_bytes += bytes_written
+                    completed += 1
+                    progress.set_progress(completed, total)
+                    for key, value in stats.items():
+                        progress.set_stat(key, value)
+
+                    if completed % 25 == 0 or result in ("failed", "missing"):
+                        log(
+                            f"Progress {completed}/{total} | "
+                            f"downloaded={stats['downloaded']} existing={stats['existing']} "
+                            f"missing={stats['missing']} failed={stats['failed']} "
+                            f"bytes={downloaded_bytes}"
+                        )
+
+                    try:
+                        next_tile = next(plan_iter)
+                        next_future = executor.submit(download_one, next_tile)
+                        future_to_tile[next_future] = next_tile
+                    except StopIteration:
+                        pass
+        finally:
+            if executor is not None:
+                _shutdown_executor_pool(executor)
+                executor = None
 
         progress.set_status("Complete")
         log("Download complete")

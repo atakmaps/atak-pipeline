@@ -45,7 +45,9 @@ class DownloadCancelled(Exception):
 STATE_GEOJSON_URL = "https://eric.clst.org/assets/wiki/uploads/Stuff/gz_2010_us_040_00_500k.json"
 USGS_TILE_URL = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}"
 USER_AGENT = "ATAK-Ortho-Downloader/1.1"
-MAX_DOWNLOAD_WORKERS = 12
+# Parallel tile fetches (thread pool + throughput probe burst). Small JPEG tiles are
+# latency-bound; more streams helps saturate typical home broadband. USGS may still cap per IP.
+MAX_DOWNLOAD_WORKERS = 24
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     SCRIPT_DIR = Path(sys._MEIPASS) / "scripts"
 else:
