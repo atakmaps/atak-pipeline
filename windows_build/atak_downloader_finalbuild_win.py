@@ -131,6 +131,16 @@ def human_bytes(num_bytes: int) -> str:
     return f"{int(num_bytes)} B"
 
 
+def human_throughput(bps: float) -> str:
+    if bps <= 0:
+        return "--"
+    mb = bps / (1024 * 1024)
+    if mb >= 0.05:
+        return f"{mb:.1f} MB/s"
+    kb = bps / 1024
+    return f"{kb:.0f} KB/s"
+
+
 # Raw estimates size the full-resolution download; on-device ATAK imagery SQLite is typically
 # much smaller than that working-set figure (single packaged DB vs loose tiles + padding).
 DEVICE_INSTALL_BYTES_VS_RAW_ESTIMATE = 0.22
@@ -189,45 +199,64 @@ def format_download_eta(seconds: float) -> str:
 
 
 def measure_usgs_imagery_effective_bps() -> Optional[float]:
-    """Measure aggregate USGS tile bytes/sec using concurrent downloads (same worker count as downloader)."""
+    """Sample aggregate bytes/sec with warm DNS/TLS and timed parallel bursts (matches worker count)."""
     z = 12
     lon0, lat0 = -98.35, 39.12
     x0, y0 = lonlat_to_tile(lon0, lat0, z)
-    urls: List[str] = []
-    for i in range(MAX_DOWNLOAD_WORKERS):
-        dx = i % 4
-        dy = i // 4
-        x, y = x0 + dx, y0 + dy
-        urls.append(USGS_TILE_URL.format(z=z, y=y, x=x))
 
-    def fetch_one(url: str) -> int:
-        sess = requests.Session()
-        sess.headers.update({"User-Agent": USER_AGENT})
-        nbytes = 0
+    def urls_for_grid(ox: int, oy: int) -> List[str]:
+        out: List[str] = []
+        for i in range(MAX_DOWNLOAD_WORKERS):
+            dx = i % 4
+            dy = i // 4
+            x, y = x0 + dx + ox, y0 + dy + oy
+            out.append(USGS_TILE_URL.format(z=z, y=y, x=x))
+        return out
+
+    warm = requests.Session()
+    warm.headers.update({"User-Agent": USER_AGENT})
+    try:
+        r0 = warm.get(USGS_TILE_URL.format(z=z, y=y0, x=x0), timeout=40)
+        r0.raise_for_status()
+        _ = r0.content
+    except Exception as e:
+        log(f"Imagery probe warm-up: {e}")
+        return None
+
+    def fetch_bytes(url: str) -> int:
+        s = requests.Session()
+        s.headers.update({"User-Agent": USER_AGENT})
         try:
-            with sess.get(url, timeout=35, stream=True) as r:
-                r.raise_for_status()
-                for chunk in r.iter_content(chunk_size=65536):
-                    if chunk:
-                        nbytes += len(chunk)
+            rr = s.get(url, timeout=45)
+            rr.raise_for_status()
+            return len(rr.content)
         except Exception as e:
             log(f"Imagery throughput probe: {e}")
             return 0
-        return nbytes
 
-    t0 = time.perf_counter()
-    try:
-        with ThreadPoolExecutor(max_workers=MAX_DOWNLOAD_WORKERS) as pool:
-            parts = list(pool.map(fetch_one, urls))
-    except Exception as e:
-        log(f"Imagery throughput probe pool: {e}")
+    def burst_bps(urls: List[str]) -> Optional[float]:
+        t0 = time.perf_counter()
+        try:
+            with ThreadPoolExecutor(max_workers=MAX_DOWNLOAD_WORKERS) as pool:
+                parts = list(pool.map(fetch_bytes, urls))
+        except Exception as e:
+            log(f"Imagery throughput probe pool: {e}")
+            return None
+        elapsed = time.perf_counter() - t0
+        total_b = sum(parts)
+        ok = sum(1 for p in parts if p >= 512)
+        if ok < max(4, MAX_DOWNLOAD_WORKERS // 2) or elapsed < 0.06 or total_b < 4096:
+            return None
+        return total_b / elapsed
+
+    b1 = burst_bps(urls_for_grid(0, 0))
+    b2 = burst_bps(urls_for_grid(5, 5))
+    candidates = [b for b in (b1, b2) if b is not None]
+    if not candidates:
         return None
-    elapsed = time.perf_counter() - t0
-    total_bytes = sum(parts)
-    successes = sum(1 for p in parts if p >= 512)
-    if successes < max(4, MAX_DOWNLOAD_WORKERS // 2) or elapsed < 0.08 or total_bytes < 4096:
-        return None
-    return total_bytes / elapsed
+    best = max(candidates)
+    log(f"Imagery throughput probe: sampled aggregate {human_throughput(best)}")
+    return best
 
 
 # -----------------------------
@@ -620,7 +649,10 @@ class ZoomDialog(tk.Tk):
                     f"{time_prefix} could not measure speed (server unreachable or blocked)"
                 )
             else:
-                self.download_time_var.set(f"{time_prefix} select zoom levels for an estimate")
+                self.download_time_var.set(
+                    f"{time_prefix} select zoom levels for an estimate "
+                    f"(recent sample {human_throughput(self._download_throughput_bps)})"
+                )
             return
         total_bytes = sum(self.zoom_total_bytes[z] for z in selected)
         total_tiles = sum(self.zoom_total_tiles[z] for z in selected)
@@ -640,7 +672,10 @@ class ZoomDialog(tk.Tk):
             )
         else:
             eta_sec = total_bytes / self._download_throughput_bps
-            self.download_time_var.set(f"{time_prefix} {format_download_eta(eta_sec)}")
+            rate_s = human_throughput(self._download_throughput_bps)
+            self.download_time_var.set(
+                f"{time_prefix} {format_download_eta(eta_sec)} (recent sample {rate_s})"
+            )
 
     def back(self) -> None:
         self.go_back = True
