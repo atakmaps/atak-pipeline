@@ -721,8 +721,21 @@ def ask_output_parent() -> str:
     root = tk.Tk()
     root.configure(cursor="arrow")
     root.withdraw()
-    folder = filedialog.askdirectory(title=pick_title, initialdir=str(initial))
-    root.destroy()
+    root.attributes("-topmost", True)
+    root.update_idletasks()
+    root.lift()
+    try:
+        folder = filedialog.askdirectory(
+            title=pick_title,
+            initialdir=str(initial),
+            parent=root,
+        )
+    finally:
+        try:
+            root.attributes("-topmost", False)
+        except tk.TclError:
+            pass
+        root.destroy()
     if folder:
         save_output_parent(Path(folder))
         return folder

@@ -659,8 +659,20 @@ def ask_output_parent() -> str:
     root = tk.Tk()
     root.configure(cursor="arrow")
     root.withdraw()
-    folder = filedialog.askdirectory(title="Select output parent folder")
-    root.destroy()
+    root.attributes("-topmost", True)
+    root.update_idletasks()
+    root.lift()
+    try:
+        folder = filedialog.askdirectory(
+            title="Select output parent folder",
+            parent=root,
+        )
+    finally:
+        try:
+            root.attributes("-topmost", False)
+        except tk.TclError:
+            pass
+        root.destroy()
     return folder or ""
 
 
