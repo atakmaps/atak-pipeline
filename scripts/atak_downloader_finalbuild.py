@@ -380,27 +380,16 @@ class ZoomDialog(tk.Tk):
             anchor="w",
         ).pack(anchor="w", pady=(0, 4))
 
-        states_sorted = "\n".join(sorted(selected_states))
-        states_row = tk.Frame(frame)
-        states_row.pack(anchor="w", fill="x", pady=(0, 10))
-        states_scroll = tk.Scrollbar(states_row)
-        states_text = tk.Text(
-            states_row,
-            height=14,
-            width=86,
-            wrap="none",
+        states_csv = ", ".join(sorted(selected_states))
+        tk.Label(
+            frame,
+            text=states_csv,
+            justify="left",
+            wraplength=note_wrap,
+            anchor="w",
             font=("Arial", 10),
-            relief="solid",
-            borderwidth=1,
-            highlightthickness=0,
-            yscrollcommand=states_scroll.set,
-            cursor="arrow",
-        )
-        states_scroll.config(command=states_text.yview)
-        states_text.pack(side="left", fill="x", expand=True)
-        states_scroll.pack(side="right", fill="y")
-        states_text.insert("1.0", states_sorted)
-        states_text.configure(state="disabled")
+            fg="gray30",
+        ).pack(anchor="w", fill="x", pady=(0, 10))
 
         bg = frame.cget("bg")
         intro = tk.Text(
