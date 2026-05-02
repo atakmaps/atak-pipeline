@@ -608,15 +608,6 @@ class DeployWizard(tk.Tk):
             self.btn_primary.configure(state="disabled", text="Working…")
             self._begin_install_plugin()
 
-        elif self._step == 5:
-            self._show_body_label()
-            self.step_label.configure(text="Starting pipeline")
-            self.body.configure(
-                text="Device install is complete. Imagery Downloader will start next."
-            )
-            self.btn_primary.pack_forget()
-            self.after(400, self._launch_downloader)
-
     def _on_primary(self) -> None:
         pass
 
@@ -767,7 +758,7 @@ class DeployWizard(tk.Tk):
             pass
         if not self._plugin_report_label:
             self._plugin_report_label = "debug-skip"
-        self._advance(5)
+        self._finish_and_launch_downloader()
 
     def _after_install_atak(self, err: Optional[Exception]) -> None:
         if self._debug_skip_atak_pending:
@@ -849,7 +840,16 @@ class DeployWizard(tk.Tk):
             self._render_step()
             return
         self._cleanup_temp_apks()
-        self._advance(5)
+        self._finish_and_launch_downloader()
+
+    def _finish_and_launch_downloader(self) -> None:
+        """Start Imagery Downloader without an extra wizard step (avoids a flash of a dummy screen)."""
+        try:
+            self.progress.stop()
+            self.progress.pack_forget()
+        except Exception:
+            pass
+        self.after_idle(self._launch_downloader)
 
     def _launch_downloader(self) -> None:
         try:
