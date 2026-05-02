@@ -10,11 +10,23 @@ DIST_DIR = ROOT / "dist"
 
 EXCLUDE_DIRS = {
     ".git",
+    ".venv",
     "__pycache__",
     ".pytest_cache",
     ".mypy_cache",
+    ".cursor",
     "dist",
-    ".venv",
+    "logs",
+    "backups",
+    "reports",
+    "build",
+    "DTED2",
+    "DTED_by_state",
+    "Hawaii_DEM",
+    "_states_tmp",
+    "output",
+    "installer-dist",
+    "New Test",
 }
 
 EXCLUDE_FILES = {
@@ -40,6 +52,11 @@ def should_skip(path: Path) -> bool:
     if parts & EXCLUDE_DIRS:
         return True
     if path.name in EXCLUDE_FILES:
+        return True
+    name = path.name
+    if ".bak_" in name or name.endswith((".bak", ".orig", ".rej", ".tmp", "~")):
+        return True
+    if name == "deploy.env":
         return True
     return False
 

@@ -1,25 +1,48 @@
-# Python
+# --- Python ---
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 *.pyo
 *.pyd
+.Python
 .venv/
 venv/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
 
-# OS / editors
+# --- Tests / typing ---
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- OS / editors ---
 .DS_Store
 Thumbs.db
-.vscode/
-.idea/
+*~
 *.swp
 *.swo
+.vscode/
+.idea/
 
-# Logs / reports
+# --- Backup & merge artifacts (never ship) ---
+*.bak
+*.bak_*
+*.orig
+*.rej
+*.tmp
+
+# --- Logs & local runtime state ---
 logs/
 reports/
+scripts/logs/
 *.log
+.last_imagery_root.txt
+.last_pipeline_output_parent.txt
+last_imagery_root.txt
 
-# Generated terrain / imagery / archives
+# --- Generated geodata / pipeline outputs ---
 *.dt0
 *.dt1
 *.dt2
@@ -34,34 +57,25 @@ reports/
 *.tar
 *.gz
 
-# Working data folders
 DTED2/
 DTED_by_state/
 Hawaii_DEM/
 _states_tmp/
 output/
 build/
-dist/
-
-# Ignore generated data
 New Test/
 backups/
-last_imagery_root.txt
-*.log
+
+# --- Build / installers ---
+dist/
 installer-dist/
+*.exe
+
+# --- Secrets (use deploy.env.example) ---
+deploy.env
+
+# --- Local notes / handoffs ---
 atak_pipeline_handoff*.md
 
-# Build artifacts
-dist/
-build/
-
-# Python
-.venv/
-__pycache__/
-*.pyc
-*.bak_*
-.last_imagery_root.txt
-.last_pipeline_output_parent.txt
-
-# Local deploy secrets / server URLs (use deploy.env.example as a template)
-deploy.env
+# --- IDE / agent (local only) ---
+.cursor/

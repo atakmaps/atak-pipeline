@@ -5,20 +5,25 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 
 required_root = [
-    "run_atak_pipeline.sh",
-    "install_linux.sh",
-    "install_windows.cmd",
-    "windows_launcher.py",
-    "ATAKPipeline_Setup.iss",
-    "build_installer.ps1",
     "README.md",
     "VERSION",
+    "requirements.txt",
+    "install_linux.sh",
+    "install_windows.cmd",
+    "run_atak_pipeline.sh",
+    "run_atak_pipeline_with_device.sh",
+    "windows_launcher.py",
+    "ATAKPipeline_Setup.iss",
+    "deploy.env.example",
 ]
 
 required_scripts = [
     "scripts/atak_downloader_finalbuild.py",
     "scripts/atak_imagery_sqlite_builder_finalbuild.py",
     "scripts/atak_dted_downloader.py",
+    "scripts/atak_adb_deploy.py",
+    "scripts/install_linux.sh",
+    "scripts/build_release.py",
 ]
 
 dangerous_duplicates = [
