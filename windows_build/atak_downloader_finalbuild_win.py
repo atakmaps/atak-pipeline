@@ -372,10 +372,10 @@ class ZoomDialog(tk.Tk):
         bg = frame.cget("bg")
         intro = tk.Text(
             frame,
-            height=7,
+            height=8,
             width=92,
             wrap="word",
-            font=("Arial", 10),
+            font=("Arial", 12),
             relief="flat",
             padx=0,
             pady=0,
@@ -385,14 +385,16 @@ class ZoomDialog(tk.Tk):
             cursor="arrow",
         )
         intro.tag_configure("title", font=("Arial", 11, "bold"))
-        intro.tag_configure("bold", font=("Arial", 10, "bold"))
+        intro.tag_configure("note_label", font=("Arial", 12, "bold"))
+        intro.tag_configure("note_body", font=("Arial", 12))
         intro.insert("end", "Select the zoom levels (resolution) to download.\n\n", "title")
-        intro.insert("end", "NOTE:", "bold")
+        intro.insert("end", "NOTE:", "note_label")
         intro.insert(
             "end",
             " This is the RAW image size only, it will not take up this much space on your Android device. "
             "Ensure you have enough hard drive space to contain this imagery. "
             "You will be able to remove the raw imagery later once compiled and installed on your device.",
+            "note_body",
         )
         intro.configure(state="disabled")
         intro.pack(anchor="w", fill="x", pady=(0, 8))
@@ -419,7 +421,19 @@ class ZoomDialog(tk.Tk):
             justify="left",
             wraplength=note_wrap,
             anchor="w",
-        ).pack(anchor="w", fill="x", pady=(0, 8))
+        ).pack(anchor="w", fill="x", pady=(0, 4))
+
+        self.device_var = tk.StringVar(
+            value="Estimated space to be installed on device: select at least one zoom"
+        )
+        tk.Label(
+            frame,
+            textvariable=self.device_var,
+            font=("Arial", 11, "bold"),
+            justify="left",
+            wraplength=note_wrap,
+            anchor="w",
+        ).pack(anchor="w", fill="x", pady=(0, 16))
 
         mid = tk.Frame(frame)
         mid.pack(fill="both", expand=True)
@@ -453,18 +467,6 @@ class ZoomDialog(tk.Tk):
                 command=self.update_size_label,
             )
             cb.pack(anchor="w")
-
-        self.device_var = tk.StringVar(
-            value="Estimated space to be installed on device: select at least one zoom"
-        )
-        tk.Label(
-            frame,
-            textvariable=self.device_var,
-            font=("Arial", 11, "bold"),
-            justify="left",
-            wraplength=note_wrap,
-            anchor="w",
-        ).pack(anchor="w", fill="x", pady=(8, 10))
 
         btns = tk.Frame(frame)
         btns.pack(fill="x", pady=(12, 0))
