@@ -48,7 +48,7 @@ ATAK_DEPLOY_REPORT_URL records what was installed on each device.
 
 DEBUG — REMOVE BEFORE RELEASE:
   DeployWizard shows a temporary “Skip (debug)” control on the Installing ATAK step
-  to bypass APK download/install while testing later wizard steps.
+  to bypass APK download/install while testing later wizard steps (_on_debug_skip_atak_install).
 """
 
 from __future__ import annotations
@@ -474,7 +474,7 @@ class DeployWizard(tk.Tk):
         self._manifest_cache: Optional[Dict[str, Any]] = None
         self._atak_version_value = ""
         self._plugin_report_label = ""
-        self._debug_skip_atak_install = False
+        self._debug_skip_atak_pending = False
 
         outer = tk.Frame(self, padx=16, pady=16)
         outer.configure(cursor="arrow")
@@ -517,7 +517,7 @@ class DeployWizard(tk.Tk):
         self.btn_skip_debug = tk.Button(
             btn_row,
             text="Skip (debug)",
-            command=self._debug_skip_atak_install,
+            command=self._on_debug_skip_atak_install,
             fg="darkred",
         )
 
@@ -736,10 +736,10 @@ class DeployWizard(tk.Tk):
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _debug_skip_atak_install(self) -> None:
+    def _on_debug_skip_atak_install(self) -> None:
         """Bypass ATAK APK download/install for local wizard debugging. REMOVE before release."""
         log("DEBUG: Skip (debug) — bypassing ATAK download/install")
-        self._debug_skip_atak_install = True
+        self._debug_skip_atak_pending = True
         try:
             self.progress.stop()
         except Exception:
@@ -754,8 +754,8 @@ class DeployWizard(tk.Tk):
         self._advance(3)
 
     def _after_install_atak(self, err: Optional[Exception]) -> None:
-        if self._debug_skip_atak_install:
-            self._debug_skip_atak_install = False
+        if self._debug_skip_atak_pending:
+            self._debug_skip_atak_pending = False
             try:
                 self.progress.stop()
             except Exception:
