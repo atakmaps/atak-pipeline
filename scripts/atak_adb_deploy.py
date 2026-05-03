@@ -14,7 +14,7 @@ Configuration (environment variables):
         "plugin_apk_url": "/releases/plugin.apk"
       }
     Relative URLs are resolved against the manifest URL. You may omit
-    plugin_apk_url if you install from a local plugin build instead.
+    plugin_apk_url when using ATAK_PLUGIN_GITHUB_REPO or other env sources.
 
   ATAK_DEPLOY_REPORT_URL — optional. Receives POST JSON when installs progress:
       After ATAK install (phase "atak_installed"):
@@ -26,18 +26,20 @@ Configuration (environment variables):
 
   ATAK_DEPLOY_API_TOKEN — optional. Sent as Authorization: Bearer when posting reports.
 
-  ATAK_PLUGIN_APK — optional local path to the plugin APK.
+  ATAK_PLUGIN_APK — optional explicit local path (overrides all other plugin sources).
 
-  ATAK_PLUGIN_REPO — optional root directory; the newest *.apk under it is used.
+  ATAK_PLUGIN_GITHUB_REPO — recommended for production: "owner/repo". Downloads the
+    chosen .apk from the latest GitHub release (official signed release asset when
+    present; debug-named assets are skipped if a non-debug .apk exists on the same
+    release). Uses the API; optional GITHUB_TOKEN or ATAK_GITHUB_TOKEN.
 
-  ATAK_PLUGIN_APK_URL — optional HTTP(S) URL to download the plugin APK (full URL,
-    or a path relative to the manifest URL). Takes precedence over GitHub.
+  ATAK_PLUGIN_REPO — optional root directory; the newest *.apk under it (may be a
+    debug build—prefer GitHub for installable release APKs).
 
-  ATAK_PLUGIN_GITHUB_REPO — optional "owner/repo". Downloads the latest release’s
-    plugin .apk from GitHub (e.g. atakmaps/BTECH-Relay). Uses the API; optional
-    GITHUB_TOKEN or ATAK_GITHUB_TOKEN for higher rate limits or private repos.
+  ATAK_PLUGIN_APK_URL — optional HTTP(S) URL or path relative to the manifest URL.
 
-  Alternatively, add optional plugin_apk_url to the manifest JSON.
+  Alternatively, add optional plugin_apk_url to the manifest JSON (lowest priority
+  among network/manifest sources after the above).
 
   ATAK_PACKAGE_NAME — ATAK applicationId to install/launch (default
     com.atakmap.app.civ).
@@ -279,7 +281,10 @@ def github_release_api_headers() -> Dict[str, str]:
 
 
 def github_latest_release_apk_browser_url(owner_repo: str) -> str:
-    """Return browser_download_url for the preferred .apk on the repo's latest GitHub release."""
+    """Return browser_download_url for the preferred release .apk on the repo's latest GitHub release.
+
+    Prefers non-debug assets, then names containing both *plugin* and *release*, then *release*.
+    """
     slug = owner_repo.strip().strip("/")
     parts = [p for p in slug.split("/") if p]
     if len(parts) != 2:
@@ -299,17 +304,26 @@ def github_latest_release_apk_browser_url(owner_repo: str) -> str:
             f"Latest GitHub release {owner}/{repo} ({tag}) has no .apk assets."
         )
 
-    def name(i: int) -> str:
+    def name_lower(i: int) -> str:
         return str(apk_assets[i].get("name", "")).lower()
 
-    for i, a in enumerate(apk_assets):
-        n = name(i)
-        if "plugin" in n and "release" in n:
-            return str(a["browser_download_url"])
-    for i, a in enumerate(apk_assets):
-        if "release" in name(i):
-            return str(a["browser_download_url"])
-    return str(apk_assets[0]["browser_download_url"])
+    # Drop debug-named APKs when a release-named alternative exists on the same release.
+    non_debug_idx = [i for i in range(len(apk_assets)) if "debug" not in name_lower(i)]
+    pool_idx = non_debug_idx if non_debug_idx else list(range(len(apk_assets)))
+
+    def prefer() -> int:
+        for i in pool_idx:
+            n = name_lower(i)
+            if "plugin" in n and "release" in n:
+                return i
+        for i in pool_idx:
+            n = name_lower(i)
+            if "release" in n:
+                return i
+        return pool_idx[0]
+
+    chosen = apk_assets[prefer()]
+    return str(chosen["browser_download_url"])
 
 
 def download_file(url: str, dest: Path, status_cb=None, timeout: int = 600) -> None:
@@ -421,6 +435,13 @@ def safe_post_report(
 def resolve_plugin_apk(manifest: Dict[str, Any], manifest_url: str) -> Tuple[Path, str, bool]:
     """
     Returns (path to apk, description for report, whether temp file should be deleted).
+
+    Resolution order:
+      1. ATAK_PLUGIN_APK — explicit file
+      2. ATAK_PLUGIN_GITHUB_REPO — latest GitHub release (preferred release APK)
+      3. ATAK_PLUGIN_REPO — newest .apk under directory
+      4. ATAK_PLUGIN_APK_URL — download
+      5. plugin_apk_url from manifest
     """
     env_apk = env_optional("ATAK_PLUGIN_APK")
     if env_apk:
@@ -428,6 +449,15 @@ def resolve_plugin_apk(manifest: Dict[str, Any], manifest_url: str) -> Tuple[Pat
         if not p.is_file():
             raise FileNotFoundError(f"ATAK_PLUGIN_APK is not a file: {p}")
         return p, str(p), False
+
+    gh = env_optional("ATAK_PLUGIN_GITHUB_REPO")
+    if gh:
+        full = github_latest_release_apk_browser_url(gh)
+        fd, tmp = tempfile.mkstemp(suffix=".apk")
+        os.close(fd)
+        tmp_path = Path(tmp)
+        download_file(full, tmp_path)
+        return tmp_path, full, True
 
     repo = env_optional("ATAK_PLUGIN_REPO")
     if repo:
@@ -450,19 +480,10 @@ def resolve_plugin_apk(manifest: Dict[str, Any], manifest_url: str) -> Tuple[Pat
         download_file(full, tmp_path)
         return tmp_path, full, True
 
-    gh = env_optional("ATAK_PLUGIN_GITHUB_REPO")
-    if gh:
-        full = github_latest_release_apk_browser_url(gh)
-        fd, tmp = tempfile.mkstemp(suffix=".apk")
-        os.close(fd)
-        tmp_path = Path(tmp)
-        download_file(full, tmp_path)
-        return tmp_path, full, True
-
     url = manifest.get("plugin_apk_url")
     if not url:
         raise RuntimeError(
-            "No plugin APK source: set ATAK_PLUGIN_GITHUB_REPO, ATAK_PLUGIN_APK_URL, "
+            "No plugin APK source: set ATAK_PLUGIN_GITHUB_REPO (recommended), ATAK_PLUGIN_APK_URL, "
             "ATAK_PLUGIN_APK, ATAK_PLUGIN_REPO, or plugin_apk_url in the manifest."
         )
     full = resolve_url(manifest_url, str(url))
