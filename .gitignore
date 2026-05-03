@@ -57,9 +57,6 @@ last_imagery_root.txt
 *.7z
 *.tar
 *.gz
-# Prebuilt imagery tile lists (optional; large — see scripts/data/tile_plans/README.md)
-!scripts/data/tile_plans/v1/*.tiles.gz
-!windows_build/data/tile_plans/v1/*.tiles.gz
 
 DTED2/
 DTED_by_state/

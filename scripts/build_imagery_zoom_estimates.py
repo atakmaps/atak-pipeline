@@ -19,7 +19,6 @@ DATA_DIR.mkdir(exist_ok=True)
 
 STATE_GEOJSON_PATH = DATA_DIR / "us_states.geojson"
 ZOOM_ESTIMATE_PATH = DATA_DIR / "zoom_estimates_z10_z16.json"
-TILE_PLAN_DIR = DATA_DIR / "tile_plans" / "v1"
 
 AVG_TILE_SIZE = {
     10: 20000,
@@ -92,15 +91,7 @@ def main() -> int:
         rings = states[state_name]
         per_zoom: Dict[str, Dict[str, int]] = {}
         for z in range(10, 17):
-            tile_count = len(
-                build_tiles_for_state(
-                    state_name,
-                    rings,
-                    z,
-                    geojson_path=STATE_GEOJSON_PATH,
-                    tile_plan_dir=TILE_PLAN_DIR,
-                )
-            )
+            tile_count = len(build_tiles_for_state(rings, z))
             est_bytes = tile_count * AVG_TILE_SIZE[z]
             per_zoom[str(z)] = {
                 "estimated_tiles": tile_count,

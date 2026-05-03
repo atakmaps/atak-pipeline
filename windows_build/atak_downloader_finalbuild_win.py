@@ -82,7 +82,6 @@ else:
 DATA_DIR = BUNDLED_SCRIPT_DIR / "data"
 ZOOM_ESTIMATE_PATH = DATA_DIR / "zoom_estimates_z10_z16.json"
 STATE_GEOJSON_PATH = DATA_DIR / "us_states.geojson"
-TILE_PLAN_DIR = DATA_DIR / "tile_plans" / "v1"
 LAST_IMAGERY_ROOT_FILE = RUNTIME_STATE_DIR / ".last_imagery_root.txt"
 LAST_IMAGERY_SESSION_STATES_FILE = RUNTIME_STATE_DIR / ".last_imagery_session_states.txt"
 
@@ -1297,13 +1296,7 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
             rings = states[state_name]
             for z in selected_zooms:
                 progress.set_status(f"Scanning {state_name} zoom {z}...")
-                tiles = build_tiles_for_state(
-                    state_name,
-                    rings,
-                    z,
-                    geojson_path=STATE_GEOJSON_PATH,
-                    tile_plan_dir=TILE_PLAN_DIR,
-                )
+                tiles = build_tiles_for_state(rings, z)
                 log(f"Planned {len(tiles)} tiles for {state_name}, zoom {z}")
                 for i, (x, y) in enumerate(tiles, start=1):
                     if i % 2048 == 0:

@@ -4,20 +4,10 @@ Tile coverage for USGS orthophoto downloads vs state GeoJSON rings.
 - Includes a tile when its Web Mercator center lies inside the state polygon, OR
   when that center is within ``boundary_buffer_m`` meters of any polygon edge
   (extra imagery past the nominal boundary so boundary lines stay visible).
-
-Precomputed tile lists (per state, per zoom) live under ``data/tile_plans/v1/`` as
-``.tiles.gz`` files; build them with ``scripts/build_tile_plan_cache.py``. At
-runtime, ``build_tiles_for_state`` loads a cache when ``geojson_path`` and
-``tile_plan_dir`` are set and the file matches the current boundary GeoJSON CRC
-and buffer distance.
 """
 from __future__ import annotations
 
-import gzip
 import math
-import struct
-import zlib
-from pathlib import Path
 from typing import List, Optional, Tuple
 
 # Miles beyond the GeoJSON boundary to keep imagery for (edge tiles + visibility).
@@ -26,80 +16,6 @@ METERS_PER_MILE = 1609.344
 DEFAULT_BOUNDARY_BUFFER_M = STATE_BOUNDARY_BUFFER_MILES * METERS_PER_MILE
 
 _SEGMENT_SAMPLES = 16
-
-# Gzip tile list cache: magic, format, zoom, geojson_crc32, boundary_m (double), n, then n*(x,y) uint32 pairs.
-_TILE_PLAN_MAGIC = b"ATKP"
-_TILE_PLAN_FORMAT = 1
-_TILE_PLAN_HEADER = struct.Struct("!4sIIIdI")  # 28 bytes
-
-
-def crc32_file(path: Path) -> int:
-    """CRC-32 of file bytes (unsigned)."""
-    h = 0
-    with path.open("rb") as f:
-        while True:
-            chunk = f.read(1024 * 1024)
-            if not chunk:
-                break
-            h = zlib.crc32(chunk, h)
-    return h & 0xFFFFFFFF
-
-
-def _tile_plan_cache_path(tile_plan_dir: Path, state_name: str, zoom: int) -> Path:
-    safe = state_name.replace("/", "_")
-    return tile_plan_dir / f"{safe}_z{zoom}.tiles.gz"
-
-
-def try_load_tile_plan_cache(
-    cache_path: Path,
-    zoom: int,
-    boundary_buffer_m: float,
-    geojson_crc32: int,
-) -> Optional[List[Tuple[int, int]]]:
-    if not cache_path.is_file():
-        return None
-    try:
-        raw = gzip.decompress(cache_path.read_bytes())
-    except (OSError, EOFError, gzip.BadGzipFile):
-        return None
-    if len(raw) < _TILE_PLAN_HEADER.size:
-        return None
-    magic, fmt, z, crc, buf_m, n = _TILE_PLAN_HEADER.unpack_from(raw, 0)
-    if magic != _TILE_PLAN_MAGIC or fmt != _TILE_PLAN_FORMAT or z != zoom or crc != geojson_crc32:
-        return None
-    if abs(buf_m - boundary_buffer_m) > 1e-6:
-        return None
-    body = raw[_TILE_PLAN_HEADER.size :]
-    if len(body) != n * 8:
-        return None
-    tiles: List[Tuple[int, int]] = []
-    off = 0
-    for _ in range(n):
-        x, y = struct.unpack_from("!II", body, off)
-        off += 8
-        tiles.append((x, y))
-    return tiles
-
-
-def save_tile_plan_cache(
-    cache_path: Path,
-    zoom: int,
-    boundary_buffer_m: float,
-    geojson_crc32: int,
-    tiles: List[Tuple[int, int]],
-) -> None:
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    header = _TILE_PLAN_HEADER.pack(
-        _TILE_PLAN_MAGIC,
-        _TILE_PLAN_FORMAT,
-        zoom,
-        geojson_crc32 & 0xFFFFFFFF,
-        float(boundary_buffer_m),
-        len(tiles),
-    )
-    body = b"".join(struct.pack("!II", int(x), int(y)) for x, y in tiles)
-    blob = gzip.compress(header + body, compresslevel=6, mtime=0)
-    cache_path.write_bytes(blob)
 
 
 def lonlat_to_tile(lon: float, lat: float, zoom: int) -> Tuple[int, int]:
@@ -213,15 +129,19 @@ def tile_qualifies(
     return min_distance_point_to_rings_m(lon, lat, rings) <= boundary_buffer_m
 
 
-def _compute_tiles_for_state(
+def build_tiles_for_state(
     rings: List[List[Tuple[float, float]]],
     zoom: int,
-    boundary_buffer_m: float,
+    boundary_buffer_m: Optional[float] = None,
 ) -> List[Tuple[int, int]]:
+    """
+    Return (x, y) tile indices whose centers lie inside the state polygon or within
+    ``boundary_buffer_m`` meters of its boundary (Web Mercator tile grid at ``zoom``).
+    """
+    buf = DEFAULT_BOUNDARY_BUFFER_M if boundary_buffer_m is None else boundary_buffer_m
+
     min_lon, min_lat, max_lon, max_lat = bbox_for_rings(rings)
-    min_lon, min_lat, max_lon, max_lat = expand_bbox_by_buffer_m(
-        min_lon, min_lat, max_lon, max_lat, boundary_buffer_m
-    )
+    min_lon, min_lat, max_lon, max_lat = expand_bbox_by_buffer_m(min_lon, min_lat, max_lon, max_lat, buf)
 
     min_x, max_y = lonlat_to_tile(min_lon, min_lat, zoom)
     max_x, min_y = lonlat_to_tile(max_lon, max_lat, zoom)
@@ -233,35 +153,6 @@ def _compute_tiles_for_state(
     for x in range(x_start, x_end + 1):
         for y in range(y_start, y_end + 1):
             lon, lat = tile_center_lonlat(x, y, zoom)
-            if tile_qualifies(lon, lat, rings, boundary_buffer_m):
+            if tile_qualifies(lon, lat, rings, buf):
                 tiles.append((x, y))
     return tiles
-
-
-def build_tiles_for_state(
-    state_name: str,
-    rings: List[List[Tuple[float, float]]],
-    zoom: int,
-    boundary_buffer_m: Optional[float] = None,
-    *,
-    geojson_path: Optional[Path] = None,
-    tile_plan_dir: Optional[Path] = None,
-) -> List[Tuple[int, int]]:
-    """
-    Return (x, y) tile indices whose centers lie inside the state polygon or within
-    ``boundary_buffer_m`` meters of its boundary (Web Mercator tile grid at ``zoom``).
-
-    When ``geojson_path`` and ``tile_plan_dir`` are set and a matching ``.tiles.gz``
-    cache exists (same GeoJSON CRC-32 and buffer), returns the cached list immediately.
-    Otherwise computes the list (slow for large states at high zoom).
-    """
-    buf = DEFAULT_BOUNDARY_BUFFER_M if boundary_buffer_m is None else float(boundary_buffer_m)
-
-    if geojson_path is not None and tile_plan_dir is not None and geojson_path.is_file():
-        crc = crc32_file(geojson_path)
-        cache_path = _tile_plan_cache_path(tile_plan_dir, state_name, zoom)
-        cached = try_load_tile_plan_cache(cache_path, zoom, buf, crc)
-        if cached is not None:
-            return cached
-
-    return _compute_tiles_for_state(rings, zoom, buf)
