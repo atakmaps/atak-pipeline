@@ -12,17 +12,20 @@ Source repository: `https://github.com/atakmaps/atak-imagery`
 
 1. Put the project on your machine and open a **terminal**:
    - **Clone:** `git clone https://github.com/atakmaps/atak-imagery.git` then `cd atak-imagery`
-   - **Release zip:** download **`atak-imagery-v1.0.0-source.zip`** (or the matching asset) from [Releases](https://github.com/atakmaps/atak-imagery/releases), then unpack and enter the folder GitHub puts the sources in:
+   - **Release zip:** under [Releases](https://github.com/atakmaps/atak-imagery/releases), download **`atak-imagery-v1.0.0-source.zip`** from **Assets** (not the auto-generated “Source code (zip)”, which uses a different folder layout). The **Assets** zip stores every file under a root directory **`atak-imagery/`** inside the archive.
+
+     Run `unzip` in the **same directory as the `.zip` file** (a **parent** folder—usually `Downloads`). That directory will gain a **`atak-imagery`** folder next to the zip:
 
      ```bash
-     cd /path/where/you/saved/the/zip
+     cd ~/Downloads
      unzip atak-imagery-v1.0.0-source.zip
+     ls atak-imagery/install_linux.sh
      cd atak-imagery
      ```
 
-     The zip always expands to a directory named **`atak-imagery/`** (with `install_linux.sh` and `README.md` at the top level of that folder). Use the real zip filename if it differs, e.g. a newer release.
+     If `ls` does not show `install_linux.sh` under `atak-imagery/`, you may have unzipped from **inside** an empty `atak-imagery` you created first (that nests a second `atak-imagery`). Remove that folder, stay in the parent directory (e.g. `Downloads`), and run `unzip` again. Use the real zip filename if you downloaded a different release.
 
-2. You should now be at the **project root** (the directory that contains `install_linux.sh`). If needed:
+2. You should now be at the **project root** (the directory that contains `install_linux.sh` and `README.md`). If needed:
 
    ```bash
    cd /path/to/atak-imagery
