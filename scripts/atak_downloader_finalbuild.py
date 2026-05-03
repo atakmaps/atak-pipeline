@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 ATAK USGS Orthophoto Downloader
+- Intro: ATAK must be installed; USB/adb device verified (ready, unlocked) before continuing
 - State selection first
 - Zoom selection second
 - Zoom screen: storage estimates, background USGS throughput probe, ETA vs selection
@@ -8,7 +9,7 @@ ATAK USGS Orthophoto Downloader
 - Zenity folder picker on Linux with Tk fallback
 - Progress bar during download
 - Safe re-run: skips tiles that already exist
-- Auto-launches SQLite builder on completion
+- Session Exit dialog, then auto-launches SQLite builder on completion
 
 Output structure:
     <selected parent>/Imagery/State/zoom/x/y.jpg
@@ -131,6 +132,249 @@ def install_excepthook() -> None:
 
 
 install_excepthook()
+
+# -----------------------------
+# Android / adb (aligned with atak_adb_deploy device step)
+# -----------------------------
+
+
+def _adb_executable() -> str:
+    return shutil.which("adb") or "adb"
+
+
+def _run_adb(args: List[str], serial: Optional[str] = None, timeout: int = 120) -> subprocess.CompletedProcess:
+    cmd = [_adb_executable()]
+    if serial:
+        cmd.extend(["-s", serial])
+    cmd.extend(args)
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+
+def adb_available() -> bool:
+    try:
+        r = subprocess.run(
+            [_adb_executable(), "version"], capture_output=True, text=True, timeout=10
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def adb_devices_raw() -> subprocess.CompletedProcess:
+    _run_adb(["start-server"], serial=None, timeout=30)
+    return _run_adb(["devices"], serial=None, timeout=30)
+
+
+def parse_adb_devices_lines(stdout: str) -> Tuple[List[str], List[str]]:
+    ready: List[str] = []
+    diag: List[str] = []
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("List of devices"):
+            continue
+        if line.startswith("*"):
+            diag.append(line)
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        serial, state = parts[0], parts[1]
+        if state == "device":
+            ready.append(serial)
+        else:
+            diag.append(line)
+    return ready, diag
+
+
+def list_usb_devices() -> List[str]:
+    r = adb_devices_raw()
+    if r.returncode != 0:
+        log(f"adb devices failed: {r.stderr or r.stdout}")
+        return []
+    ready, _diag = parse_adb_devices_lines(r.stdout)
+    return ready
+
+
+def adb_devices_human_summary() -> str:
+    exe = _adb_executable()
+    r = adb_devices_raw()
+    out = (r.stdout or "").strip()
+    err = (r.stderr or "").strip()
+    lines = [f"adb binary: {exe}", "", "$ adb devices", out or "(no stdout)"]
+    if err:
+        lines.extend(["", "stderr:", err])
+    return "\n".join(lines)
+
+
+def pick_adb_serial(devices: List[str]) -> Optional[str]:
+    if not devices:
+        return None
+    if len(devices) == 1:
+        return devices[0]
+    pref = os.environ.get("ANDROID_SERIAL", "").strip()
+    if pref and pref in devices:
+        return pref
+    return None
+
+
+def ask_adb_serial_choice(parent: tk.Tk, devices: List[str]) -> Optional[str]:
+    top = tk.Toplevel(parent)
+    top.title("Select device")
+    top.configure(cursor="arrow")
+    top.transient(parent)
+    top.grab_set()
+    choice: List[Optional[str]] = [None]
+
+    tk.Label(top, text="Multiple devices connected. Pick one:").pack(padx=12, pady=(12, 6))
+    lb = tk.Listbox(top, height=min(len(devices), 8), width=40)
+    for d in devices:
+        lb.insert("end", d)
+    lb.pack(padx=12, pady=6)
+    lb.selection_set(0)
+
+    def ok() -> None:
+        sel = lb.curselection()
+        if sel:
+            choice[0] = devices[int(sel[0])]
+        top.destroy()
+
+    def cancel() -> None:
+        top.destroy()
+
+    bf = tk.Frame(top)
+    bf.pack(pady=12)
+    tk.Button(bf, text="OK", command=ok).pack(side="left", padx=6)
+    tk.Button(bf, text="Cancel", command=cancel).pack(side="left", padx=6)
+    parent.wait_window(top)
+    return choice[0]
+
+
+def check_device_ready_and_unlocked(serial: Optional[str]) -> Tuple[bool, str]:
+    r = _run_adb(["shell", "getprop", "sys.boot_completed"], serial=serial, timeout=25)
+    if r.returncode != 0:
+        return False, (
+            "Could not communicate with the device over adb.\n\n"
+            "Check the USB cable, enable USB debugging, and accept the prompt on the phone."
+        )
+    if (r.stdout or "").strip() != "1":
+        return False, "Wait until the device has finished booting to the home screen, then try again."
+
+    r2 = _run_adb(["shell", "dumpsys", "window"], serial=serial, timeout=45)
+    out = r2.stdout or ""
+    if "mDreamingLockscreen=true" in out:
+        return False, "Unlock your phone (dismiss the lock screen) and try again."
+    return True, ""
+
+
+def verify_adb_device_for_imagery_downloader(parent: tk.Tk) -> Tuple[bool, Optional[str], str]:
+    if not adb_available():
+        return False, None, (
+            "adb was not found. Install Android platform tools (adb) and ensure it is on PATH."
+        )
+
+    devices = list_usb_devices()
+    if not devices:
+        detail = adb_devices_human_summary()
+        if len(detail) > 2400:
+            detail = detail[:2400] + "\n…"
+        return False, None, (
+            "No Android device in the *device* state (ready for adb).\n\n"
+            "If the phone shows “unauthorized”, unlock it and accept the USB debugging "
+            "prompt. If you see “no permissions”, install udev rules for adb.\n\n"
+            f"{detail}"
+        )
+
+    serial = pick_adb_serial(devices)
+    if serial is None and len(devices) > 1:
+        serial = ask_adb_serial_choice(parent, devices)
+    if not serial:
+        return False, None, "No device was selected."
+
+    ready, msg = check_device_ready_and_unlocked(serial)
+    if not ready:
+        return False, None, msg
+
+    os.environ["ANDROID_SERIAL"] = serial
+    return True, serial, ""
+
+
+DOWNLOADER_INTRO_TEXT = (
+    "This program will download imagery to your device. "
+    "You must have ATAK installed on your device. "
+    "If you do not have ATAK installed, exit this program and run the "
+    "ATAK Device Installer application.\n\n"
+    "\n\n"
+    "1. On the phone, enable Developer options and USB debugging.\n"
+    "2. Connect USB\n"
+    "3. Select USB Mode, File Transfer\n\n"
+    "Select Continue when your device is connected."
+)
+
+
+def show_downloader_intro_and_verify_device() -> bool:
+    """ATAK + USB prerequisites, then adb device / unlock check. Return True to proceed."""
+    root = tk.Tk()
+    root.title(APP_TITLE)
+    root.geometry("640x520")
+    root.minsize(560, 420)
+    root.configure(cursor="arrow")
+    proceed = {"ok": False}
+
+    tk.Label(root, text="Before you begin", font=("TkDefaultFont", 12, "bold")).pack(anchor="w", padx=16, pady=(16, 6))
+    tk.Label(root, text=DOWNLOADER_INTRO_TEXT, justify="left", wraplength=600).pack(anchor="w", padx=16, pady=(0, 8))
+
+    status_var = tk.StringVar(value="")
+    tk.Label(root, textvariable=status_var, fg="#333").pack(anchor="w", padx=16, pady=(4, 8))
+
+    btn_row = tk.Frame(root)
+    btn_row.pack(pady=12)
+
+    def on_quit() -> None:
+        proceed["ok"] = False
+        root.destroy()
+
+    btn_cont = tk.Button(btn_row, text="Continue", width=12)
+
+    def on_continue() -> None:
+        btn_cont.configure(state="disabled")
+        status_var.set("Verifying device via adb…")
+        root.update_idletasks()
+        ok, _serial, err = verify_adb_device_for_imagery_downloader(root)
+        btn_cont.configure(state="normal")
+        status_var.set("")
+        if not ok:
+            messagebox.showwarning(APP_TITLE, err, parent=root)
+            return
+        proceed["ok"] = True
+        root.destroy()
+
+    btn_cont.configure(command=on_continue)
+    btn_cont.pack(side="left", padx=6)
+    tk.Button(btn_row, text="Quit", width=12, command=on_quit).pack(side="left", padx=6)
+
+    root.protocol("WM_DELETE_WINDOW", on_quit)
+    root.mainloop()
+    return bool(proceed["ok"])
+
+
+def show_downloader_session_exit_dialog(parent: tk.Tk) -> None:
+    dlg = tk.Toplevel(parent)
+    dlg.title(APP_TITLE)
+    dlg.configure(cursor="arrow")
+    dlg.transient(parent)
+    dlg.grab_set()
+    dlg.resizable(False, False)
+    tk.Label(
+        dlg,
+        text="Imagery download for this session is complete.\n\nYou may now exit the program.",
+        justify="center",
+    ).pack(padx=24, pady=(20, 12))
+
+    def on_exit() -> None:
+        dlg.destroy()
+
+    tk.Button(dlg, text="Exit", width=12, command=on_exit).pack(pady=(0, 20))
+    parent.wait_window(dlg)
 
 # -----------------------------
 # Helpers
@@ -1252,7 +1496,8 @@ def pump_gui_logs(window: ProgressWindow) -> None:
         if getattr(window, "completion_message", None):
             msg = window.completion_message
             window.completion_message = None
-            messagebox.showinfo(APP_TITLE, msg)
+            log(msg.replace("\n\n", " | "))
+            show_downloader_session_exit_dialog(window)
             try:
                 window.closed = True
                 window.destroy()
@@ -1286,6 +1531,10 @@ def pump_gui_logs(window: ProgressWindow) -> None:
 def main() -> None:
     log(f"Log file: {LOGGER.log_file}")
     zoom_estimates = load_zoom_estimates()
+
+    if not show_downloader_intro_and_verify_device():
+        log("Exited at device verification prompt.")
+        return
 
     while True:
         selector = StateSelectionDialog()
