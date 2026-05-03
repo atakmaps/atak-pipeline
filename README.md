@@ -10,8 +10,19 @@ Source repository: `https://github.com/atakmaps/atak-imagery`
 
 ### How to run the installer
 
-1. Put the project on your machine (clone the repo or extract a release zip) and open a **terminal**.
-2. Change to the project root, the directory that contains `install_linux.sh`:
+1. Put the project on your machine and open a **terminal**:
+   - **Clone:** `git clone https://github.com/atakmaps/atak-imagery.git` then `cd atak-imagery`
+   - **Release zip:** download **`atak-imagery-v1.0.0-source.zip`** (or the matching asset) from [Releases](https://github.com/atakmaps/atak-imagery/releases), then unpack and enter the folder GitHub puts the sources in:
+
+     ```bash
+     cd /path/where/you/saved/the/zip
+     unzip atak-imagery-v1.0.0-source.zip
+     cd atak-imagery
+     ```
+
+     The zip always expands to a directory named **`atak-imagery/`** (with `install_linux.sh` and `README.md` at the top level of that folder). Use the real zip filename if it differs, e.g. a newer release.
+
+2. You should now be at the **project root** (the directory that contains `install_linux.sh`). If needed:
 
    ```bash
    cd /path/to/atak-imagery
