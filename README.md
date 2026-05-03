@@ -21,29 +21,21 @@ Source repository: `https://github.com/atakmaps/atak-imagery`
      unzip atak-imagery-v1.0.0-source.zip
      ls atak-imagery/install_linux.sh
      cd atak-imagery
+     chmod +x install_linux.sh
+     ./install_linux.sh
      ```
 
      If `ls` does not show `install_linux.sh` under `atak-imagery/`, you may have unzipped from **inside** an empty `atak-imagery` you created first (that nests a second `atak-imagery`). Remove that folder, stay in the parent directory (e.g. `Downloads`), and run `unzip` again. Use the real zip filename if you downloaded a different release.
 
-2. You should now be at the **project root** (the directory that contains `install_linux.sh` and `README.md`). If needed:
+     The script may ask for **`sudo`** for system packages. Some file managers can run `install_linux.sh` with a double-click; if nothing happens, use the terminal block above.
+
+2. If you **cloned** instead of using the zip, run the installer from the repo root:
 
    ```bash
-   cd /path/to/atak-imagery
-   ```
-
-3. If the script is not marked executable, run:
-
-   ```bash
+   cd atak-imagery
    chmod +x install_linux.sh
-   ```
-
-4. Start the install:
-
-   ```bash
    ./install_linux.sh
    ```
-
-   Some file managers can run the script with a double-click; if nothing happens or you only see a flash, use a terminal and the commands above. The script may ask for **`sudo`** so it can install system packages (Python 3, Tk, Zenity, **adb**, venv support, and related distro packages).
 
 ### What `install_linux.sh` does
 
