@@ -73,13 +73,15 @@ This project provides a streamlined pipeline for:
 
 Primary Linux/source scripts:
 
-- `scripts/atak_downloader_finalbuild.py`
+- `scripts/atak_downloader_finalbuild.py` — standalone Imagery Downloader
+- `scripts/atak_downloader_from_installer.py` — same core, launched only after Device Installer
 - `scripts/atak_imagery_sqlite_builder_finalbuild.py`
 - `scripts/atak_dted_downloader.py`
 
 Windows-specific build copies:
 
 - `windows_build/atak_downloader_finalbuild_win.py`
+- `windows_build/atak_downloader_from_installer_win.py`
 - `windows_build/atak_imagery_sqlite_builder_finalbuild_win.py`
 - `windows_build/atak_dted_downloader_win.py`
 

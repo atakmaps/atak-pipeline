@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """
-ATAK USGS Orthophoto Downloader
-- Intro: ATAK must be installed; USB/adb device verified (ready, unlocked) before continuing
+ATAK USGS Orthophoto Downloader (shared core)
+
+**Two entry points** (do not fold into one script — different first/last UI):
+
+- **Standalone Imagery app:** run ``atak_downloader_finalbuild.py`` / desktop launcher.
+  Full intro (ATAK + USB/adb), session Exit dialog, then SQLite builder.
+- **After Device Installer:** run ``atak_downloader_from_installer.py`` only (set by
+  ``atak_adb_deploy``). Skips the standalone intro/exit; same download + SQLite chain.
+
 - State selection first
 - Zoom selection second
 - Zoom screen: storage estimates, background USGS throughput probe, ETA vs selection
@@ -9,7 +16,6 @@ ATAK USGS Orthophoto Downloader
 - Zenity folder picker on Linux with Tk fallback
 - Progress bar during download
 - Safe re-run: skips tiles that already exist
-- Session Exit dialog, then auto-launches SQLite builder on completion
 
 Output structure:
     <selected parent>/Imagery/State/zoom/x/y.jpg
@@ -36,6 +42,17 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 APP_TITLE = "ATAK Imagery Downloader"
+
+# Set to "1" by scripts/atak_downloader_from_installer.py (Device Installer post-step only).
+LAUNCHED_FROM_DEVICE_INSTALLER_ENV = "ATAK_DOWNLOADER_LAUNCHED_FROM_DEVICE_INSTALLER"
+
+
+def is_launched_from_device_installer() -> bool:
+    return os.environ.get(LAUNCHED_FROM_DEVICE_INSTALLER_ENV, "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
 
 class DownloadCancelled(Exception):
@@ -1496,8 +1513,11 @@ def pump_gui_logs(window: ProgressWindow) -> None:
         if getattr(window, "completion_message", None):
             msg = window.completion_message
             window.completion_message = None
-            log(msg.replace("\n\n", " | "))
-            show_downloader_session_exit_dialog(window)
+            if is_launched_from_device_installer():
+                messagebox.showinfo(APP_TITLE, msg, parent=window)
+            else:
+                log(msg.replace("\n\n", " | "))
+                show_downloader_session_exit_dialog(window)
             try:
                 window.closed = True
                 window.destroy()
@@ -1532,9 +1552,12 @@ def main() -> None:
     log(f"Log file: {LOGGER.log_file}")
     zoom_estimates = load_zoom_estimates()
 
-    if not show_downloader_intro_and_verify_device():
-        log("Exited at device verification prompt.")
-        return
+    if is_launched_from_device_installer():
+        log("Launched from Device Installer — skipping standalone USB/adb intro.")
+    else:
+        if not show_downloader_intro_and_verify_device():
+            log("Exited at device verification prompt.")
+            return
 
     while True:
         selector = StateSelectionDialog()

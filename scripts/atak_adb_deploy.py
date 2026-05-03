@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-ATAK + plugin install over ADB, then launch the normal imagery pipeline.
+ATAK + plugin install over ADB, then launch the imagery pipeline via
+``atak_downloader_from_installer.py`` (not the standalone Imagery Downloader entry).
 
 Configuration (environment variables):
 
@@ -114,7 +115,7 @@ if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
 else:
     SCRIPT_DIR = Path(__file__).resolve().parent
 
-DOWNLOADER = SCRIPT_DIR / "atak_downloader_finalbuild.py"
+DOWNLOADER = SCRIPT_DIR / "atak_downloader_from_installer.py"
 USER_AGENT = "ATAK-Pipeline-Deploy/1.0"
 PROJECT_ROOT = SCRIPT_DIR.parent
 DEPLOY_ENV_PATH = PROJECT_ROOT / "deploy.env"
@@ -910,7 +911,7 @@ class DeployWizard(tk.Tk):
         self._finish_and_launch_downloader()
 
     def _finish_and_launch_downloader(self) -> None:
-        """Start ATAK Imagery Downloader without an extra wizard step (avoids a flash of a dummy screen)."""
+        """Start imagery pipeline (installer entry: skips standalone downloader intro/exit UI)."""
         try:
             self.progress.stop()
             self.progress.pack_forget()
@@ -922,7 +923,10 @@ class DeployWizard(tk.Tk):
         try:
             subprocess.Popen([sys.executable, str(DOWNLOADER)])
         except Exception as e:
-            messagebox.showerror(APP_TITLE, f"Failed to start downloader:\n{e}")
+            messagebox.showerror(
+                APP_TITLE,
+                f"Failed to start imagery pipeline (installer entry):\n{e}",
+            )
         self.destroy()
 
 

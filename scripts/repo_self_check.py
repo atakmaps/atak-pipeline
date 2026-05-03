@@ -19,6 +19,7 @@ required_root = [
 
 required_scripts = [
     "scripts/atak_downloader_finalbuild.py",
+    "scripts/atak_downloader_from_installer.py",
     "scripts/atak_imagery_sqlite_builder_finalbuild.py",
     "scripts/atak_dted_downloader.py",
     "scripts/atak_adb_deploy.py",
