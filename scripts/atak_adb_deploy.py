@@ -46,6 +46,9 @@ Server operators can host the manifest next to the ATAK APK and update
 atak_version / atak_apk_url whenever you publish a new build; the POST to
 ATAK_DEPLOY_REPORT_URL records what was installed on each device.
 
+If adb reports INSTALL_FAILED_VERSION_DOWNGRADE (APK versionCode lower than the
+  installed app), the installer retries once with adb install --allow-downgrade.
+
 DEBUG — REMOVE BEFORE RELEASE (do not ship; remove before pushing a release):
   DeployWizard shows one temporary “Skip (debug)” button on the Installing ATAK and
   Installing plugin steps (same widget position; command switches) to bypass those APK installs
@@ -328,6 +331,16 @@ def install_apk(serial: str, apk_path: Path, status_cb=None) -> None:
     if status_cb:
         status_cb(f"Installing {apk_path.name}…")
     r = run_adb(["install", "-r", str(apk_path)], serial=serial, timeout=600)
+    combined = (r.stderr or "") + (r.stdout or "")
+    if r.returncode != 0 and "INSTALL_FAILED_VERSION_DOWNGRADE" in combined:
+        log("adb install: INSTALL_FAILED_VERSION_DOWNGRADE; retrying with --allow-downgrade")
+        if status_cb:
+            status_cb(f"Installing {apk_path.name} (allow downgrade)…")
+        r = run_adb(
+            ["install", "--allow-downgrade", "-r", str(apk_path)],
+            serial=serial,
+            timeout=600,
+        )
     if r.returncode != 0:
         raise RuntimeError(f"adb install failed:\n{(r.stderr or r.stdout).strip()}")
 
