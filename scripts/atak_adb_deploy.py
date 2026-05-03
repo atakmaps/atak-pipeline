@@ -47,7 +47,9 @@ atak_version / atak_apk_url whenever you publish a new build; the POST to
 ATAK_DEPLOY_REPORT_URL records what was installed on each device.
 
 If adb reports INSTALL_FAILED_VERSION_DOWNGRADE (APK versionCode lower than the
-  installed app), the installer retries once with adb install --allow-downgrade.
+  installed app), the installer retries with ``adb install --allow-downgrade -r``.
+  If the phone's package manager does not support that flag (IllegalArgumentException /
+  Unknown option), it retries again with the legacy ``-d`` flag (``adb install -d -r``).
 
 DEBUG — REMOVE BEFORE RELEASE (do not ship; remove before pushing a release):
   DeployWizard shows one temporary “Skip (debug)” button on the Installing ATAK and
@@ -328,21 +330,43 @@ def download_file(url: str, dest: Path, status_cb=None, timeout: int = 600) -> N
 
 
 def install_apk(serial: str, apk_path: Path, status_cb=None) -> None:
+    """Install APK with optional downgrade retries (newer and older Android pm installs)."""
+    name = apk_path.name
     if status_cb:
-        status_cb(f"Installing {apk_path.name}…")
+        status_cb(f"Installing {name}…")
     r = run_adb(["install", "-r", str(apk_path)], serial=serial, timeout=600)
     combined = (r.stderr or "") + (r.stdout or "")
+
     if r.returncode != 0 and "INSTALL_FAILED_VERSION_DOWNGRADE" in combined:
         log("adb install: INSTALL_FAILED_VERSION_DOWNGRADE; retrying with --allow-downgrade")
         if status_cb:
-            status_cb(f"Installing {apk_path.name} (allow downgrade)…")
+            status_cb(f"Installing {name} (allow downgrade)…")
         r = run_adb(
             ["install", "--allow-downgrade", "-r", str(apk_path)],
             serial=serial,
             timeout=600,
         )
+        combined = (r.stderr or "") + (r.stdout or "")
+        if r.returncode != 0 and _device_rejects_allow_downgrade_flag(combined):
+            log("adb install: device pm has no --allow-downgrade; retrying with -d")
+            if status_cb:
+                status_cb(f"Installing {name} (allow downgrade, -d)…")
+            r = run_adb(["install", "-d", "-r", str(apk_path)], serial=serial, timeout=600)
+
     if r.returncode != 0:
         raise RuntimeError(f"adb install failed:\n{(r.stderr or r.stdout).strip()}")
+
+
+def _device_rejects_allow_downgrade_flag(combined: str) -> bool:
+    """True if device's ``pm install`` failed because ``--allow-downgrade`` is unsupported."""
+    if not combined:
+        return False
+    lower = combined.lower()
+    if "unknown option" in lower and "allow-downgrade" in lower:
+        return True
+    if "illegalargumentexception" in lower and "allow-downgrade" in lower:
+        return True
+    return False
 
 
 def launch_atak(serial: str) -> None:
