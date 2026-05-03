@@ -823,9 +823,6 @@ class ProgressWindow(tk.Tk):
 # -----------------------------
 
 def show_summary_confirm(selected_states: List[str], selected_zooms: List[int], total_bytes: int, total_tiles: int) -> bool:
-    root = tk.Tk()
-    root.configure(cursor="arrow")
-    root.withdraw()
     state_summary = ", ".join(selected_states[:6])
     if len(selected_states) > 6:
         state_summary += f", ... ({len(selected_states)} total)"
@@ -836,8 +833,33 @@ def show_summary_confirm(selected_states: List[str], selected_zooms: List[int], 
         f"Estimated tiles:\n{total_tiles:,}\n\n"
         f"Continue to choose an output folder?"
     )
+    if shutil.which("zenity"):
+        try:
+            r = subprocess.run(
+                ["zenity", "--question", "--no-wrap", f"--title={APP_TITLE}", f"--text={msg}"],
+                check=False,
+            )
+            return r.returncode == 0
+        except OSError:
+            pass
+
+    root = tk.Tk()
+    try:
+        root.option_add("*cursor", "arrow")
+    except tk.TclError:
+        pass
+    root.configure(cursor="arrow")
+    root.withdraw()
+    root.update_idletasks()
+    try:
+        root.update()
+    except tk.TclError:
+        pass
     answer = messagebox.askyesno(APP_TITLE, msg, parent=root)
-    root.destroy()
+    try:
+        root.destroy()
+    except tk.TclError:
+        pass
     return bool(answer)
 
 
