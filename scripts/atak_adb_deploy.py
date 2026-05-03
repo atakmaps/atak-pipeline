@@ -28,10 +28,10 @@ Configuration (environment variables):
 
   ATAK_PLUGIN_APK — optional explicit local path (overrides all other plugin sources).
 
-  ATAK_PLUGIN_GITHUB_REPO — recommended for production: "owner/repo". Downloads the
-    chosen .apk from the latest GitHub release (official signed release asset when
-    present; debug-named assets are skipped if a non-debug .apk exists on the same
-    release). Uses the API; optional GITHUB_TOKEN or ATAK_GITHUB_TOKEN.
+  ATAK_PLUGIN_GITHUB_REPO — **recommended**: ``owner/repo``. The installer downloads one
+    ``.apk`` from that repository’s **Releases** page — specifically GitHub’s **Latest**
+    release (``/releases/latest``), from the files attached to that release — not from git
+    branches or Sources zip.
 
   ATAK_PLUGIN_REPO — optional root directory; the newest *.apk under it (may be a
     debug build—prefer GitHub for installable release APKs).
@@ -280,10 +280,13 @@ def github_release_api_headers() -> Dict[str, str]:
     return h
 
 
-def github_latest_release_apk_browser_url(owner_repo: str) -> str:
-    """Return browser_download_url for the preferred release .apk on the repo's latest GitHub release.
+def github_latest_release_plugin_apk(owner_repo: str) -> Tuple[str, str, str]:
+    """Pick the plugin ``.apk`` from the repo's **published** GitHub Release marked *latest*.
 
-    Prefers non-debug assets, then names containing both *plugin* and *release*, then *release*.
+    Uses the GitHub API: ``GET /repos/{{owner}}/{{repo}}/releases/latest`` — i.e. the
+    release GitHub shows as "Latest" on the Releases page, **not** a branch or raw files.
+
+    Returns ``(browser_download_url, tag_name, asset_file_name)``.
     """
     slug = owner_repo.strip().strip("/")
     parts = [p for p in slug.split("/") if p]
@@ -296,18 +299,18 @@ def github_latest_release_apk_browser_url(owner_repo: str) -> str:
     r = requests.get(api, headers=github_release_api_headers(), timeout=60)
     r.raise_for_status()
     data = r.json()
+    tag = str(data.get("tag_name") or "?")
     assets = data.get("assets") or []
     apk_assets = [a for a in assets if str(a.get("name", "")).lower().endswith(".apk")]
     if not apk_assets:
-        tag = data.get("tag_name", "?")
         raise RuntimeError(
-            f"Latest GitHub release {owner}/{repo} ({tag}) has no .apk assets."
+            f"GitHub Releases latest for {owner}/{repo} ({tag}) has no .apk assets attached. "
+            "Upload a release .apk on that release."
         )
 
     def name_lower(i: int) -> str:
         return str(apk_assets[i].get("name", "")).lower()
 
-    # Drop debug-named APKs when a release-named alternative exists on the same release.
     non_debug_idx = [i for i in range(len(apk_assets)) if "debug" not in name_lower(i)]
     pool_idx = non_debug_idx if non_debug_idx else list(range(len(apk_assets)))
 
@@ -323,7 +326,9 @@ def github_latest_release_apk_browser_url(owner_repo: str) -> str:
         return pool_idx[0]
 
     chosen = apk_assets[prefer()]
-    return str(chosen["browser_download_url"])
+    filename = str(chosen.get("name", ""))
+    url = str(chosen["browser_download_url"])
+    return url, tag, filename
 
 
 def download_file(url: str, dest: Path, status_cb=None, timeout: int = 600) -> None:
@@ -438,7 +443,8 @@ def resolve_plugin_apk(manifest: Dict[str, Any], manifest_url: str) -> Tuple[Pat
 
     Resolution order:
       1. ATAK_PLUGIN_APK — explicit file
-      2. ATAK_PLUGIN_GITHUB_REPO — latest GitHub release (preferred release APK)
+      2. ATAK_PLUGIN_GITHUB_REPO — **GitHub Releases**: downloads the chosen ``.apk``
+         attached to the repository's *Latest* published release (API ``.../releases/latest``).
       3. ATAK_PLUGIN_REPO — newest .apk under directory
       4. ATAK_PLUGIN_APK_URL — download
       5. plugin_apk_url from manifest
@@ -452,12 +458,15 @@ def resolve_plugin_apk(manifest: Dict[str, Any], manifest_url: str) -> Tuple[Pat
 
     gh = env_optional("ATAK_PLUGIN_GITHUB_REPO")
     if gh:
-        full = github_latest_release_apk_browser_url(gh)
+        dl_url, rel_tag, asset_name = github_latest_release_plugin_apk(gh)
+        log(
+            f"Plugin APK from GitHub Releases (latest): {gh} @ {rel_tag} — asset {asset_name!r}"
+        )
         fd, tmp = tempfile.mkstemp(suffix=".apk")
         os.close(fd)
         tmp_path = Path(tmp)
-        download_file(full, tmp_path)
-        return tmp_path, full, True
+        download_file(dl_url, tmp_path)
+        return tmp_path, f"github-releases:{gh}@{rel_tag}:{asset_name}", True
 
     repo = env_optional("ATAK_PLUGIN_REPO")
     if repo:
