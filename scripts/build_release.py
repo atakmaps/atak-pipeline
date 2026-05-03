@@ -43,7 +43,7 @@ def read_version() -> str:
 
 
 def zip_version_label(version: str) -> str:
-    """VERSION may be 'v0.2.9' or '0.2.9'; zip uses a single leading v."""
+    """VERSION may be 'v1.0.0' or '1.0.0'; zip uses a single leading v."""
     v = version.strip()
     return v[1:] if v.startswith("v") else v
 
