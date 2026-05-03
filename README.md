@@ -83,6 +83,7 @@ Primary Linux/source scripts:
 - `scripts/atak_downloader_from_installer.py` — same core, launched only after Device Installer
 - `scripts/atak_imagery_sqlite_builder_finalbuild.py`
 - `scripts/atak_dted_downloader.py`
+- `scripts/build_tile_plan_cache.py` — optional: precompute per-state tile lists into `data/tile_plans/v1/*.tiles.gz` so downloads skip the slow “scanning tile coverage” step (see `scripts/data/tile_plans/README.md`)
 
 Windows-specific build copies:
 
