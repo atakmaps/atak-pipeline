@@ -46,6 +46,10 @@ def consume_standalone_dted_skip() -> bool:
     return True
 
 
+def peek_standalone_dted_skip_pending() -> bool:
+    return SKIP_STANDALONE_DTED_AFTER_SQLITE.is_file()
+
+
 STATE_ABBR_TO_NAME = {
     "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
     "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
@@ -123,6 +127,130 @@ def install_excepthook() -> None:
 
 
 install_excepthook()
+
+
+def find_latest_dted_zip(upload_dir: Path) -> Optional[Path]:
+    if not upload_dir.is_dir():
+        return None
+    zips = list(upload_dir.glob("dted2_*.zip"))
+    if not zips:
+        return None
+    return max(zips, key=lambda p: p.stat().st_mtime)
+
+
+def resolve_dted_zip_for_upload_dir(upload_dir: Path) -> Optional[Path]:
+    z = find_latest_dted_zip(upload_dir)
+    if z is not None:
+        return z
+    parent = upload_dir.parent
+    if not parent.is_dir():
+        return None
+    all_z = list(parent.glob("ATAK_Upload_*/dted2_*.zip"))
+    if not all_z:
+        return None
+    return max(all_z, key=lambda p: p.stat().st_mtime)
+
+
+def ask_delete_raw_imagery_win(parent: tk.Tk, imagery_root: Path, *, dted_complete: bool) -> bool:
+    result: Dict[str, bool] = {"delete": False}
+
+    dlg = tk.Toplevel(parent)
+    dlg.title(APP_TITLE)
+    dlg.configure(cursor="arrow")
+    dlg.transient(parent)
+    dlg.grab_set()
+    dlg.resizable(False, False)
+
+    if dted_complete:
+        lead = (
+            "Imagery SQLite cache and DTED package are ready.\n\n"
+            "ATAK only needs the final SQLite and DTED outputs on your device.\n\n"
+        )
+    else:
+        lead = (
+            "The DTED step finished without packages for your selection.\n\n"
+            "You can still delete raw downloaded imagery from this computer to free space.\n\n"
+        )
+    text = lead + f"Delete raw downloaded imagery now?\n\n{imagery_root}"
+    tk.Label(dlg, text=text, justify="left", wraplength=520).pack(padx=16, pady=(16, 8))
+
+    btn_row = tk.Frame(dlg)
+    btn_row.pack(pady=(8, 16))
+
+    def on_yes() -> None:
+        result["delete"] = True
+        dlg.destroy()
+
+    def on_no() -> None:
+        result["delete"] = False
+        dlg.destroy()
+
+    tk.Button(btn_row, text="Yes", width=10, command=on_yes).pack(side="left", padx=6)
+    tk.Button(btn_row, text="No", width=10, command=on_no).pack(side="left", padx=6)
+
+    parent.wait_window(dlg)
+    return result["delete"]
+
+
+def show_exit_ready_dialog_win(parent: tk.Tk) -> None:
+    dlg = tk.Toplevel(parent)
+    dlg.title(APP_TITLE)
+    dlg.configure(cursor="arrow")
+    dlg.transient(parent)
+    dlg.grab_set()
+    dlg.resizable(False, False)
+    tk.Label(
+        dlg,
+        text=(
+            "ATAK build outputs are ready in the upload folder.\n"
+            "Copy files to your Android device if needed, then relaunch ATAK.\n\n"
+            "You may now exit the program."
+        ),
+        justify="center",
+    ).pack(padx=24, pady=(20, 12))
+
+    def on_exit() -> None:
+        dlg.destroy()
+
+    tk.Button(dlg, text="Exit", width=12, command=on_exit).pack(pady=(0, 20))
+    parent.wait_window(dlg)
+
+
+def finalize_imagery_cleanup_and_exit_win(
+    parent: tk.Tk,
+    upload_dir: Optional[Path],
+    imagery_root: Optional[Path],
+    *,
+    dted_complete: bool,
+) -> None:
+    """Delete/keep raw imagery, reveal upload folder, then Exit dialog (no adb on this build)."""
+    if imagery_root and imagery_root.is_dir() and LAST_IMAGERY_ROOT_FILE.is_file():
+        try:
+            cleanup = ask_delete_raw_imagery_win(parent, imagery_root, dted_complete=dted_complete)
+            if cleanup:
+                shutil.rmtree(imagery_root)
+                log(f"Deleted raw imagery folder: {imagery_root}")
+                try:
+                    LAST_IMAGERY_ROOT_FILE.unlink()
+                    log(f"Deleted saved imagery path file: {LAST_IMAGERY_ROOT_FILE}")
+                except OSError as cleanup_exc:
+                    log(f"Warning: saved imagery path file removal failed: {cleanup_exc}")
+            else:
+                log(f"Raw imagery retained: {imagery_root}")
+        except Exception as cleanup_exc:
+            log(f"Warning: raw imagery cleanup failed: {cleanup_exc}")
+            try:
+                messagebox.showwarning(APP_TITLE, f"Raw imagery cleanup failed:\n{cleanup_exc}", parent=parent)
+            except Exception:
+                pass
+
+    if upload_dir and upload_dir.exists():
+        try:
+            os.startfile(str(upload_dir))
+        except Exception as open_exc:
+            log(f"WARNING: failed to open upload folder: {open_exc}")
+
+    show_exit_ready_dialog_win(parent)
 
 
 def clean_name(value: str) -> str:
@@ -308,6 +436,8 @@ class ProgressWindow(tk.Tk):
         self.closed = False
         self.completion_message = None
         self.error_message = None
+        self.upload_dir: Optional[Path] = None
+        self.final_dted_zip: Optional[Path] = None
 
     def append_log(self, line: str) -> None:
         self.text.insert("end", line)
@@ -618,6 +748,8 @@ def run_download(selected_states: List[str], mode: str, output_parent: Path, pac
         log(f"Missing: {stats['missing']}")
         log(f"Failed: {stats['failed']}")
 
+        progress.upload_dir = upload_dir
+        progress.final_dted_zip = final_zip_path
         progress.completion_message = "DTED build complete."
         try:
             LOGGER.close()
@@ -645,25 +777,24 @@ def pump_gui_logs(window: ProgressWindow) -> None:
         if getattr(window, "completion_message", None):
             msg = window.completion_message
             window.completion_message = None
-            messagebox.showinfo(APP_TITLE, msg)
+            is_full_dted = msg == "DTED build complete."
 
-            upload_dir = None
-            try:
-                if LAST_IMAGERY_ROOT_FILE.exists():
-                    imagery_root = Path(LAST_IMAGERY_ROOT_FILE.read_text(encoding="utf-8").strip())
-                    if imagery_root.is_dir():
-                        from datetime import datetime
-                        date_str = datetime.now().strftime("%Y%m%d")
-                        upload_dir = imagery_root.parent / f"ATAK_Upload_{date_str}"
+            imagery_root: Optional[Path] = None
+            if LAST_IMAGERY_ROOT_FILE.exists():
+                ir = Path(LAST_IMAGERY_ROOT_FILE.read_text(encoding="utf-8").strip())
+                if ir.is_dir():
+                    imagery_root = ir
 
-                        cleanup = messagebox.askyesno(
-                            APP_TITLE,
-                            "DTED build succeeded.\n\n"
-                            "ATAK only needs the final SQLite and DTED outputs.\n\n"
-                            f"Delete raw downloaded imagery now?\n\n{imagery_root}"
-                        )
+            if is_full_dted:
+                log(msg)
+                ud = getattr(window, "upload_dir", None)
+                finalize_imagery_cleanup_and_exit_win(window, ud, imagery_root, dted_complete=True)
+            else:
+                messagebox.showinfo(APP_TITLE, msg, parent=window)
+                if imagery_root is not None:
+                    try:
+                        cleanup = ask_delete_raw_imagery_win(window, imagery_root, dted_complete=False)
                         if cleanup:
-                            import shutil
                             shutil.rmtree(imagery_root)
                             log(f"Deleted raw imagery folder: {imagery_root}")
                             try:
@@ -673,34 +804,19 @@ def pump_gui_logs(window: ProgressWindow) -> None:
                                 log(f"Warning: saved imagery path file removal failed: {cleanup_exc}")
                         else:
                             log(f"Raw imagery retained: {imagery_root}")
-            except Exception as cleanup_exc:
-                log(f"Warning: raw imagery cleanup failed: {cleanup_exc}")
-                try:
-                    messagebox.showwarning(APP_TITLE, f"Raw imagery cleanup failed:\n{cleanup_exc}")
-                except Exception:
-                    pass
+                    except Exception as cleanup_exc:
+                        log(f"Warning: raw imagery cleanup failed: {cleanup_exc}")
+                        try:
+                            messagebox.showwarning(APP_TITLE, f"Raw imagery cleanup failed:\n{cleanup_exc}", parent=window)
+                        except Exception:
+                            pass
 
-            try:
-
-                messagebox.showinfo(
-                    APP_TITLE,
-                    "Your ATAK imagery and DTED build is complete.\n\n"
-                    "Please copy the .sql and DTED files into your /Downloads folder on your Android device."
-                )
-
+                upload_dir = getattr(window, "upload_dir", None)
                 if upload_dir and upload_dir.exists():
-                    import subprocess, sys, os
                     try:
-                        if sys.platform.startswith("linux"):
-                            subprocess.Popen(["xdg-open", str(upload_dir)])
-                        elif sys.platform.startswith("win"):
-                            os.startfile(str(upload_dir))
-                        elif sys.platform == "darwin":
-                            subprocess.Popen(["open", str(upload_dir)])
+                        os.startfile(str(upload_dir))
                     except Exception as open_exc:
                         log(f"WARNING: failed to open upload folder: {open_exc}")
-            except Exception:
-                pass
 
             window.closed = True
             try:

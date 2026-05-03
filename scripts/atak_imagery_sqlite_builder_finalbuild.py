@@ -389,6 +389,7 @@ class App:
         self.completion_message: Optional[str] = None
         self.error_message: Optional[str] = None
         self.imagery_root: Optional[Path] = None
+        self._last_upload_dir: Optional[Path] = None
 
         self.status_var = tk.StringVar(value="Waiting for configuration...")
         self.summary_var = tk.StringVar(value="")
@@ -443,18 +444,51 @@ class App:
         if self.completion_message:
             msg = self.completion_message
             self.completion_message = None
-            messagebox.showinfo("Build complete", msg)
-
             try:
-                self.root.destroy()
-
+                skip_inline_dted = False
                 try:
-                    from atak_dted_downloader import consume_standalone_dted_skip
+                    from atak_dted_downloader import (
+                        complete_device_deploy_and_imagery_cleanup,
+                        consume_standalone_dted_skip,
+                        peek_standalone_dted_skip_pending,
+                    )
 
-                    if consume_standalone_dted_skip():
-                        sys.exit(0)
+                    skip_inline_dted = peek_standalone_dted_skip_pending()
                 except ImportError:
                     pass
+
+                if skip_inline_dted and self.imagery_root and self._last_upload_dir:
+                    consume_standalone_dted_skip()
+                    complete_device_deploy_and_imagery_cleanup(
+                        self.root,
+                        self._last_upload_dir,
+                        None,
+                        self.imagery_root,
+                        dted_complete=True,
+                    )
+                    try:
+                        self.root.quit()
+                        self.root.destroy()
+                    except Exception:
+                        pass
+                    sys.exit(0)
+
+                if skip_inline_dted:
+                    consume_standalone_dted_skip()
+                    messagebox.showwarning(
+                        "Build complete",
+                        "Inline DTED was used earlier, but the upload folder could not be determined.\n\n"
+                        "Push SQLite and DTED from the ATAK_Upload_* folder manually, then exit.",
+                    )
+                    try:
+                        self.root.quit()
+                        self.root.destroy()
+                    except Exception:
+                        pass
+                    sys.exit(0)
+
+                messagebox.showinfo("Build complete", msg)
+                self.root.destroy()
 
                 if getattr(sys, "frozen", False):
                     if hasattr(sys, "_MEIPASS"):
@@ -563,6 +597,7 @@ class App:
             self.status_var.set("Build complete")
             self.append_log("")
             self.append_log(f"All state SQLite builds complete: {built} file(s) in {upload_dir}")
+            self._last_upload_dir = upload_dir
             self.completion_message = "SQLite build complete."
         except Exception as exc:
             self.status_var.set("Build failed")
