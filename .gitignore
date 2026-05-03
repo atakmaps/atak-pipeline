@@ -39,6 +39,7 @@ reports/
 scripts/logs/
 *.log
 .last_imagery_root.txt
+.last_imagery_session_states.txt
 .last_pipeline_output_parent.txt
 last_imagery_root.txt
 

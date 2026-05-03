@@ -7,7 +7,7 @@ ATAK USGS Orthophoto Downloader (shared core)
 - **Standalone Imagery app:** run ``atak_downloader_finalbuild.py`` / desktop launcher.
   Full intro (ATAK + USB/adb), session Exit dialog, then SQLite builder.
 - **After Device Installer:** run ``atak_downloader_from_installer.py`` only (set by
-  ``atak_adb_deploy``). Skips the standalone intro/exit; same download + SQLite chain.
+  ``atak_adb_deploy``). Skips the standalone USB/adb intro; same download, SQLite handoff dialog, and builder chain.
 
 - State selection first
 - Zoom selection second
@@ -66,13 +66,18 @@ USER_AGENT = "ATAK-Ortho-Downloader/1.1"
 MAX_DOWNLOAD_WORKERS = 24
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     SCRIPT_DIR = Path(sys._MEIPASS) / "scripts"
+    # Writable, persistent location for .last_imagery_root.txt (MEIPASS itself is temporary).
+    RUNTIME_STATE_DIR = Path(sys.executable).resolve().parent
 else:
     SCRIPT_DIR = Path(__file__).resolve().parent
+    RUNTIME_STATE_DIR = SCRIPT_DIR
 
 DATA_DIR = SCRIPT_DIR / "data"
 ZOOM_ESTIMATE_PATH = DATA_DIR / "zoom_estimates_z10_z16.json"
 STATE_GEOJSON_PATH = DATA_DIR / "us_states.geojson"
-LAST_IMAGERY_ROOT_FILE = SCRIPT_DIR / ".last_imagery_root.txt"
+LAST_IMAGERY_ROOT_FILE = RUNTIME_STATE_DIR / ".last_imagery_root.txt"
+# Written after each successful imagery download: state folder names (for SQLite builder filter).
+LAST_IMAGERY_SESSION_STATES_FILE = RUNTIME_STATE_DIR / ".last_imagery_session_states.txt"
 
 from imagery_tile_selection import (  # noqa: E402
     STATE_BOUNDARY_BUFFER_MILES,
@@ -374,7 +379,16 @@ def show_downloader_intro_and_verify_device() -> bool:
     return bool(proceed["ok"])
 
 
-def show_downloader_session_exit_dialog(parent: tk.Tk) -> None:
+DOWNLOADER_NEXT_SQLITE_DIALOG_TEXT = (
+    "Imagery successfully downloaded.\n\n"
+    "Next will be to build the data for install on your device.\n\n"
+    "Click Next to continue."
+)
+
+
+def show_downloader_session_exit_dialog(parent: tk.Tk, body: Optional[str] = None) -> None:
+    """After imagery (and optional inline DTED), prompt user before launching the SQLite builder."""
+    text = body if body is not None else DOWNLOADER_NEXT_SQLITE_DIALOG_TEXT
     dlg = tk.Toplevel(parent)
     dlg.title(APP_TITLE)
     dlg.configure(cursor="arrow")
@@ -383,14 +397,16 @@ def show_downloader_session_exit_dialog(parent: tk.Tk) -> None:
     dlg.resizable(False, False)
     tk.Label(
         dlg,
-        text="Imagery download for this session is complete.\n\nYou may now exit the program.",
+        text=text,
         justify="center",
+        wraplength=480,
     ).pack(padx=24, pady=(20, 12))
 
-    def on_exit() -> None:
+    def on_next() -> None:
         dlg.destroy()
 
-    tk.Button(dlg, text="Exit", width=12, command=on_exit).pack(pady=(0, 20))
+    dlg.protocol("WM_DELETE_WINDOW", on_next)
+    tk.Button(dlg, text="Next", width=12, command=on_next).pack(pady=(0, 20))
     parent.wait_window(dlg)
 
 # -----------------------------
@@ -656,6 +672,16 @@ class StateSelectionDialog(tk.Tk):
         selected = sorted([state for state, var in self.vars.items() if var.get()])
         if not selected:
             messagebox.showwarning(APP_TITLE, "Select at least one state.")
+            return
+        with_imagery = [s for s in selected if s != "District of Columbia"]
+        if not with_imagery:
+            messagebox.showwarning(
+                APP_TITLE,
+                "District of Columbia cannot be used alone for this download.\n\n"
+                "USGS imagery here follows full state boundaries; Washington D.C. is omitted from that set.\n"
+                "Select at least one state (e.g. Maryland or Delaware). Note: “District of Columbia” is "
+                "listed right under Delaware.",
+            )
             return
         self.result_states = selected
         if self.result_mode != "all":
@@ -984,6 +1010,7 @@ class ProgressWindow(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.closed = False
         self.completion_message = None
+        self.completion_log_summary = None
         self.error_message = None
 
     def append_log(self, line: str) -> None:
@@ -997,6 +1024,20 @@ class ProgressWindow(tk.Tk):
         self.counter_var.set(f"{completed} / {total}")
         width = max(self.canvas.winfo_width(), 1)
         fill_w = int(width * (completed / total))
+        self.canvas.coords(self.bar, 0, 0, fill_w, 24)
+        self.canvas.coords(self.bar_text, 8, 12)
+        self.canvas.itemconfig(self.bar_text, text=f"{pct}%")
+
+    def set_progress_fraction(self, frac: float, counter_detail: Optional[str] = None) -> None:
+        frac = max(0.0, min(1.0, float(frac)))
+        pct = int(frac * 100)
+        if counter_detail is not None:
+            self.counter_var.set(counter_detail)
+        else:
+            self.counter_var.set(f"{pct}%")
+        self.update_idletasks()
+        width = max(int(self.canvas.winfo_width()), 1)
+        fill_w = int(width * frac)
         self.canvas.coords(self.bar, 0, 0, fill_w, 24)
         self.canvas.coords(self.bar_text, 8, 12)
         self.canvas.itemconfig(self.bar_text, text=f"{pct}%")
@@ -1131,7 +1172,7 @@ def show_summary_confirm(selected_states: List[str], selected_zooms: List[int], 
     return True
 
 
-PIPELINE_OUTPUT_PARENT_FILE = SCRIPT_DIR / ".last_pipeline_output_parent.txt"
+PIPELINE_OUTPUT_PARENT_FILE = RUNTIME_STATE_DIR / ".last_pipeline_output_parent.txt"
 
 
 def default_output_parent() -> Path:
@@ -1255,6 +1296,7 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
     executor: Optional[ThreadPoolExecutor] = None
 
     try:
+        log(f"run_download: states={selected_states!r} zooms={selected_zooms!r} mode={mode!r}")
         progress.wait_if_paused()
         progress.set_status("Loading state boundaries...")
         geojson_path = bundled_state_geojson_path()
@@ -1269,7 +1311,19 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
             state_names.append(state_name)
 
         if not state_names:
-            raise RuntimeError("No valid states selected.")
+            if not selected_states:
+                raise RuntimeError(
+                    "No valid states selected (empty list). "
+                    "Try running the downloader again; if this repeats, keep the log file for support."
+                )
+            raise RuntimeError(
+                "No states to download imagery for.\n\n"
+                f"You selected: {', '.join(selected_states)}\n\n"
+                "This tool skips District of Columbia: USGS state imagery uses full state shapes, "
+                "and D.C. is not included as its own download region. "
+                "Choose at least one state (for example Delaware or Maryland). "
+                "D.C. is listed directly under Delaware in the list — easy to select by mistake."
+            )
 
         output_root = output_parent / "Imagery"
         output_root.mkdir(parents=True, exist_ok=True)
@@ -1457,6 +1511,19 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
         log(f"Missing: {stats['missing']}")
         log(f"Failed: {stats['failed']}")
 
+        try:
+            LAST_IMAGERY_SESSION_STATES_FILE.write_text(
+                "\n".join(sorted(state_names)) + "\n",
+                encoding="utf-8",
+            )
+            log(
+                f"Recorded states for next SQLite build: {', '.join(state_names)} "
+                f"({LAST_IMAGERY_SESSION_STATES_FILE.name}). "
+                "Older folders under Imagery/ will be skipped unless you delete that file."
+            )
+        except OSError as exc:
+            log(f"WARNING: could not write session state list: {exc}")
+
         dted_note = ""
         try:
             from atak_dted_downloader import mark_standalone_dted_skip, run_dted_inline_for_states
@@ -1478,7 +1545,8 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
             log(f"DTED: failed — {exc}")
 
         progress.set_status("Complete")
-        progress.completion_message = "Download complete." + dted_note
+        progress.completion_log_summary = "Download complete." + dted_note
+        progress.completion_message = DOWNLOADER_NEXT_SQLITE_DIALOG_TEXT + dted_note
 
     except DownloadCancelled:
         log("Download cancelled by user.")
@@ -1513,11 +1581,11 @@ def pump_gui_logs(window: ProgressWindow) -> None:
         if getattr(window, "completion_message", None):
             msg = window.completion_message
             window.completion_message = None
-            if is_launched_from_device_installer():
-                messagebox.showinfo(APP_TITLE, msg, parent=window)
-            else:
-                log(msg.replace("\n\n", " | "))
-                show_downloader_session_exit_dialog(window)
+            summary = getattr(window, "completion_log_summary", None)
+            if summary is not None:
+                window.completion_log_summary = None
+                log(summary.replace("\n\n", " | "))
+            show_downloader_session_exit_dialog(window, body=msg)
             try:
                 window.closed = True
                 window.destroy()
@@ -1598,9 +1666,11 @@ def main() -> None:
         progress = ProgressWindow(LOGGER.log_file)
         pump_gui_logs(progress)
 
+        zooms_arg = list(selected_zooms)
+        states_arg = list(selector.result_states)
         worker = threading.Thread(
             target=run_download,
-            args=(selected_zooms, selector.result_states, selector.result_mode, Path(output_folder), progress),
+            args=(zooms_arg, states_arg, selector.result_mode, Path(output_folder), progress),
             daemon=True,
         )
         worker.start()

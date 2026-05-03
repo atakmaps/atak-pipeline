@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Runs scripts/install_linux.sh, which copies the app into ~/.local/share/atak-imagery
+# (persistent; safe to delete the extracted folder afterward). Override with ATAK_PIPELINE_HOME.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

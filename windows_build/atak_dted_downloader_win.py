@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import math
 import queue
 import re
 import shutil
 import sys
 import os
 import threading
+import time
 import traceback
 import zipfile
 from datetime import datetime
@@ -21,6 +23,11 @@ from tkinter import filedialog, messagebox, simpledialog
 APP_TITLE = "ATAK DTED Downloader"
 BASE_URL = "http://31.220.30.74/dted"
 USER_AGENT = "ATAK-DTED-Downloader/1.0"
+
+_DTED_W_DOWNLOAD = 0.55
+_DTED_W_EXTRACT = 0.28
+_DTED_W_BUILD = 0.12
+_DTED_W_CLEANUP = 0.05
 if getattr(sys, "frozen", False):
     RUNTIME_STATE_DIR = Path(sys.executable).resolve().parent
 else:
@@ -44,6 +51,28 @@ def consume_standalone_dted_skip() -> bool:
     except OSError:
         pass
     return True
+
+
+def bring_window_forward(win: tk.Misc, *, persistent_topmost: bool = False) -> None:
+    try:
+        win.lift()
+        win.attributes("-topmost", True)
+        win.update_idletasks()
+        try:
+            win.focus_force()
+        except tk.TclError:
+            pass
+        if not persistent_topmost:
+
+            def _clear() -> None:
+                try:
+                    win.attributes("-topmost", False)
+                except tk.TclError:
+                    pass
+
+            win.after(400, _clear)
+    except tk.TclError:
+        pass
 
 
 def peek_standalone_dted_skip_pending() -> bool:
@@ -188,6 +217,9 @@ def ask_delete_raw_imagery_win(parent: tk.Tk, imagery_root: Path, *, dted_comple
     tk.Button(btn_row, text="Yes", width=10, command=on_yes).pack(side="left", padx=6)
     tk.Button(btn_row, text="No", width=10, command=on_no).pack(side="left", padx=6)
 
+    dlg.update_idletasks()
+    bring_window_forward(parent, persistent_topmost=False)
+    bring_window_forward(dlg, persistent_topmost=True)
     parent.wait_window(dlg)
     return result["delete"]
 
@@ -213,6 +245,9 @@ def show_exit_ready_dialog_win(parent: tk.Tk) -> None:
         dlg.destroy()
 
     tk.Button(dlg, text="Exit", width=12, command=on_exit).pack(pady=(0, 20))
+    dlg.update_idletasks()
+    bring_window_forward(parent, persistent_topmost=False)
+    bring_window_forward(dlg, persistent_topmost=True)
     parent.wait_window(dlg)
 
 
@@ -226,6 +261,10 @@ def finalize_imagery_cleanup_and_exit_win(
     """Delete/keep raw imagery, reveal upload folder, then Exit dialog (no adb on this build)."""
     if imagery_root and imagery_root.is_dir() and LAST_IMAGERY_ROOT_FILE.is_file():
         try:
+            if hasattr(parent, "set_status"):
+                parent.set_status("Choose whether to delete raw downloaded imagery on this computer.")
+                parent.update_idletasks()
+            bring_window_forward(parent, persistent_topmost=False)
             cleanup = ask_delete_raw_imagery_win(parent, imagery_root, dted_complete=dted_complete)
             if cleanup:
                 shutil.rmtree(imagery_root)
@@ -240,6 +279,7 @@ def finalize_imagery_cleanup_and_exit_win(
         except Exception as cleanup_exc:
             log(f"Warning: raw imagery cleanup failed: {cleanup_exc}")
             try:
+                bring_window_forward(parent, persistent_topmost=False)
                 messagebox.showwarning(APP_TITLE, f"Raw imagery cleanup failed:\n{cleanup_exc}", parent=parent)
             except Exception:
                 pass
@@ -454,6 +494,20 @@ class ProgressWindow(tk.Tk):
         self.canvas.coords(self.bar_text, 8, 12)
         self.canvas.itemconfig(self.bar_text, text=f"{pct}%")
 
+    def set_progress_fraction(self, frac: float, counter_detail: Optional[str] = None) -> None:
+        frac = max(0.0, min(1.0, float(frac)))
+        pct = int(frac * 100)
+        if counter_detail is not None:
+            self.counter_var.set(counter_detail)
+        else:
+            self.counter_var.set(f"{pct}%")
+        self.update_idletasks()
+        width = max(int(self.canvas.winfo_width()), 1)
+        fill_w = int(width * frac)
+        self.canvas.coords(self.bar, 0, 0, fill_w, 24)
+        self.canvas.coords(self.bar_text, 8, 12)
+        self.canvas.itemconfig(self.bar_text, text=f"{pct}%")
+
     def set_status(self, text: str) -> None:
         self.status_var.set(text)
         self.update_idletasks()
@@ -475,6 +529,23 @@ class ProgressWindow(tk.Tk):
             self.destroy()
 
 
+def _dted_download_slice_progress(
+    overall: Callable[[float], None],
+    state_index: int,
+    n_states: int,
+    bytes_read: int,
+    total_bytes: int,
+) -> None:
+    n = max(n_states, 1)
+    base = _DTED_W_DOWNLOAD * (state_index / n)
+    span = _DTED_W_DOWNLOAD / n
+    if total_bytes > 0:
+        overall(base + span * (bytes_read / total_bytes))
+    else:
+        sub = 1.0 - math.exp(-bytes_read / (8 * 1024 * 1024))
+        overall(base + span * min(sub, 0.97))
+
+
 def remote_file_size(session: requests.Session, url: str) -> int:
     try:
         resp = session.head(url, timeout=30, allow_redirects=True)
@@ -492,6 +563,7 @@ def download_file(
     url: str,
     out_path: Path,
     log_fn: Optional[Callable[[str], None]] = None,
+    progress_cb: Optional[Callable[[int, int], None]] = None,
 ) -> str:
     _log = log_fn or log
     size_hint = remote_file_size(session, url)
@@ -504,15 +576,35 @@ def download_file(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = out_path.with_suffix(out_path.suffix + ".part")
 
+    last_emit = 0.0
+
+    def _emit_progress(read: int, total_known: int, *, force: bool = False) -> None:
+        nonlocal last_emit
+        if not progress_cb:
+            return
+        now = time.monotonic()
+        complete = total_known > 0 and read >= total_known
+        if force or complete or now - last_emit >= 0.12:
+            last_emit = now
+            progress_cb(read, total_known)
+
     try:
         with session.get(url, timeout=300, stream=True) as r:
             if r.status_code == 404:
                 return "missing"
             r.raise_for_status()
+            cl = r.headers.get("Content-Length", "").strip()
+            total_bytes = int(cl) if cl.isdigit() else 0
+            if total_bytes <= 0:
+                total_bytes = size_hint if size_hint > 0 else -1
+            read = 0
             with open(tmp_path, "wb") as f:
                 for chunk in r.iter_content(chunk_size=1024 * 256):
                     if chunk:
                         f.write(chunk)
+                        read += len(chunk)
+                        _emit_progress(read, total_bytes)
+            _emit_progress(read, total_bytes if total_bytes > 0 else read, force=True)
         tmp_path.replace(out_path)
         return "downloaded"
     except Exception as exc:
@@ -546,24 +638,31 @@ def build_final_dted_zip(
     extract_root: Path,
     final_zip_path: Path,
     log_fn: Optional[Callable[[str], None]] = None,
+    on_packed: Optional[Callable[[int, int], None]] = None,
 ) -> None:
     _log = log_fn or log
     if final_zip_path.exists():
         final_zip_path.unlink()
 
-    _log(f"Building final ATAK zip: {final_zip_path}")
-
-    with zipfile.ZipFile(final_zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=5) as zf:
-        for state_dir in sorted(extract_root.iterdir(), key=lambda p: p.name.lower()):
-            if not state_dir.is_dir():
+    entries: List[Tuple[Path, str]] = []
+    for state_dir in sorted(extract_root.iterdir(), key=lambda p: p.name.lower()):
+        if not state_dir.is_dir():
+            continue
+        for item in sorted(state_dir.rglob("*")):
+            if not item.is_file():
                 continue
+            arcname = item.relative_to(state_dir)
+            entries.append((item, arcname.as_posix()))
 
-            for item in sorted(state_dir.rglob("*")):
-                if not item.is_file():
-                    continue
-                arcname = item.relative_to(state_dir)
-                zf.write(item, arcname.as_posix())
-                _log(f"ADD {arcname.as_posix()}")
+    _log(f"Building final ATAK zip: {final_zip_path} ({len(entries)} files)")
+
+    nf = len(entries)
+    with zipfile.ZipFile(final_zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=5) as zf:
+        for idx, (item, arc_posix) in enumerate(entries, start=1):
+            zf.write(item, arc_posix)
+            _log(f"ADD {arc_posix}")
+            if on_packed:
+                on_packed(idx, nf)
 
     _log(f"Final zip ready: {final_zip_path}")
 
@@ -605,7 +704,16 @@ def run_dted_inline_for_states(
         plan.append((state_name, url, out_path))
 
     total = len(plan)
-    progress.set_progress(0, total)
+    n_states = max(total, 1)
+
+    def set_overall(frac: float, detail: Optional[str] = None) -> None:
+        fn = getattr(progress, "set_progress_fraction", None)
+        if callable(fn):
+            fn(frac, counter_detail=detail)
+        else:
+            progress.set_progress(int(frac * 100), 100)
+
+    set_overall(0.0, f"0 / {total} states")
     progress.set_status("DTED: downloading state ZIPs…")
 
     session = requests.Session()
@@ -613,14 +721,22 @@ def run_dted_inline_for_states(
 
     completed = 0
     try:
-        for state_name, url, out_path in plan:
+        for i, (state_name, url, out_path) in enumerate(plan):
             progress.wait_if_paused()
-            progress.set_status(f"DTED: downloading {state_name}")
-            log_sink(f"DTED: requesting {url}")
-            result = download_file(session, url, out_path, log_fn=log_sink)
+            progress.set_status(f"DTED: downloading {state_name}…")
+            log_sink(f"DTED: GET {url}")
+
+            idx = i
+
+            def dl_progress(read: int, tot: int, ix: int = idx) -> None:
+                def apply_fr(fr: float) -> None:
+                    set_overall(fr, f"{int(fr * 100)}% · state {ix + 1} / {total}")
+                _dted_download_slice_progress(apply_fr, ix, total, read, tot)
+
+            result = download_file(session, url, out_path, log_fn=log_sink, progress_cb=dl_progress)
             stats[result] += 1
             completed += 1
-            progress.set_progress(completed, total)
+            set_overall(_DTED_W_DOWNLOAD * ((idx + 1) / n_states), f"{int(_DTED_W_DOWNLOAD * (idx + 1) / n_states * 100)}% · state {idx + 1} / {total}")
             for key, value in stats.items():
                 progress.set_stat(key, value)
             log_sink(f"DTED: {state_name}: {result} ({completed}/{total})")
@@ -633,23 +749,33 @@ def run_dted_inline_for_states(
         if stats["missing"] > 0:
             log_sink(f"DTED: WARNING missing ZIPs: {stats['missing']}")
 
+        extract_plan = [(sn, op) for sn, _, op in plan if op.exists()]
+        m_ext = max(len(extract_plan), 1)
+
         progress.set_status("DTED: extracting state ZIPs…")
         extracted_any = False
-        for state_name, _, out_path in plan:
+        for j, (state_name, out_path) in enumerate(extract_plan):
             progress.wait_if_paused()
-            if not out_path.exists():
-                log_sink(f"DTED: WARNING skipping missing zip during extraction: {out_path}")
-                continue
+            progress.set_status(f"DTED: extracting {state_name}…")
             extract_state_zip(out_path, extract_root, log_fn=log_sink)
             extracted_any = True
+            fr = _DTED_W_DOWNLOAD + _DTED_W_EXTRACT * ((j + 1) / m_ext)
+            set_overall(fr, f"{int(fr * 100)}% · extract {j + 1} / {len(extract_plan)}")
 
         if not extracted_any:
             log_sink("DTED: no packages extracted; skipping final zip.")
             return None
 
         progress.wait_if_paused()
+        base_b = _DTED_W_DOWNLOAD + _DTED_W_EXTRACT
+
+        def on_packed(cur: int, tot: int) -> None:
+            fr = base_b + _DTED_W_BUILD * (cur / max(tot, 1))
+            set_overall(fr, f"{int(fr * 100)}% · packing {cur} / {tot}")
+
         progress.set_status("DTED: building dted2.zip…")
-        build_final_dted_zip(extract_root, final_zip_path, log_fn=log_sink)
+        build_final_dted_zip(extract_root, final_zip_path, log_fn=log_sink, on_packed=on_packed)
+        set_overall(base_b + _DTED_W_BUILD, f"{int((base_b + _DTED_W_BUILD) * 100)}% · finishing…")
 
         log_sink(f"DTED: complete -> {final_zip_path}")
         return final_zip_path
@@ -689,21 +815,34 @@ def run_download(selected_states: List[str], mode: str, output_parent: Path, pac
             plan.append((state_name, url, out_path))
 
         total = len(plan)
-        progress.set_progress(0, total)
-        progress.set_status("Downloading state ZIPs...")
+        n_states = max(total, 1)
+
+        def set_overall(frac: float, detail: Optional[str] = None) -> None:
+            progress.set_progress_fraction(frac, counter_detail=detail)
+
+        set_overall(0.0, f"0 / {total} states")
+        progress.set_status("Downloading state ZIPs…")
 
         session = requests.Session()
         session.headers.update({"User-Agent": USER_AGENT})
 
         completed = 0
-        for state_name, url, out_path in plan:
-            progress.set_status(f"Downloading {state_name}")
-            log(f"Requesting: {url}")
-            result = download_file(session, url, out_path)
+        for i, (state_name, url, out_path) in enumerate(plan):
+            progress.set_status(f"Downloading {state_name}…")
+            log(f"GET {url}")
+
+            idx = i
+
+            def dl_progress(read: int, tot: int, ix: int = idx) -> None:
+                def apply_fr(fr: float) -> None:
+                    set_overall(fr, f"{int(fr * 100)}% · state {ix + 1} / {total}")
+                _dted_download_slice_progress(apply_fr, ix, total, read, tot)
+
+            result = download_file(session, url, out_path, progress_cb=dl_progress)
             stats[result] += 1
             completed += 1
 
-            progress.set_progress(completed, total)
+            set_overall(_DTED_W_DOWNLOAD * ((idx + 1) / n_states), f"{int(_DTED_W_DOWNLOAD * (idx + 1) / n_states * 100)}% · state {idx + 1} / {total}")
             for key, value in stats.items():
                 progress.set_stat(key, value)
 
@@ -717,25 +856,37 @@ def run_download(selected_states: List[str], mode: str, output_parent: Path, pac
         if stats["missing"] > 0:
             log(f"WARNING: continuing with missing tiles: {stats['missing']}")
 
-        progress.set_status("Extracting state ZIPs...")
+        extract_plan = [(sn, op) for sn, _, op in plan if op.exists()]
+        m_ext = max(len(extract_plan), 1)
+
+        progress.set_status("Extracting state ZIPs…")
         extracted_any = False
-        for state_name, _, out_path in plan:
-            if not out_path.exists():
-                log(f"WARNING: skipping missing zip during extraction: {out_path}")
-                continue
+        for j, (state_name, out_path) in enumerate(extract_plan):
+            progress.set_status(f"Extracting {state_name}…")
             extract_state_zip(out_path, extract_root)
             extracted_any = True
+            fr = _DTED_W_DOWNLOAD + _DTED_W_EXTRACT * ((j + 1) / m_ext)
+            set_overall(fr, f"{int(fr * 100)}% · extract {j + 1} / {len(extract_plan)}")
 
         if not extracted_any:
             progress.completion_message = "No DTED packages were available for the selected state(s)."
             return
 
-        progress.set_status("Building final dted2.zip...")
-        build_final_dted_zip(extract_root, final_zip_path)
+        base_b = _DTED_W_DOWNLOAD + _DTED_W_EXTRACT
 
-        progress.set_status("Cleaning temporary files...")
+        def on_packed(cur: int, tot: int) -> None:
+            fr = base_b + _DTED_W_BUILD * (cur / max(tot, 1))
+            set_overall(fr, f"{int(fr * 100)}% · packing {cur} / {tot}")
+
+        progress.set_status("Building final dted2.zip…")
+        build_final_dted_zip(extract_root, final_zip_path, on_packed=on_packed)
+        set_overall(base_b + _DTED_W_BUILD, f"{int((base_b + _DTED_W_BUILD) * 100)}% · finishing…")
+
+        progress.set_status("Cleaning temporary files…")
+        set_overall(_DTED_W_DOWNLOAD + _DTED_W_EXTRACT + _DTED_W_BUILD + _DTED_W_CLEANUP * 0.45)
         shutil.rmtree(downloads_dir, ignore_errors=True)
         shutil.rmtree(extract_root, ignore_errors=True)
+        set_overall(1.0, "100%")
 
         progress.set_status("Complete")
         log("DTED download complete")
@@ -788,8 +939,16 @@ def pump_gui_logs(window: ProgressWindow) -> None:
             if is_full_dted:
                 log(msg)
                 ud = getattr(window, "upload_dir", None)
+                if hasattr(window, "set_status"):
+                    window.set_status("Build finished. Next: optional cleanup and upload folder.")
+                    window.update_idletasks()
+                bring_window_forward(window, persistent_topmost=False)
                 finalize_imagery_cleanup_and_exit_win(window, ud, imagery_root, dted_complete=True)
             else:
+                if hasattr(window, "set_status"):
+                    window.set_status("Showing summary — next: optional raw imagery cleanup.")
+                    window.update_idletasks()
+                bring_window_forward(window, persistent_topmost=False)
                 messagebox.showinfo(APP_TITLE, msg, parent=window)
                 if imagery_root is not None:
                     try:
@@ -807,6 +966,7 @@ def pump_gui_logs(window: ProgressWindow) -> None:
                     except Exception as cleanup_exc:
                         log(f"Warning: raw imagery cleanup failed: {cleanup_exc}")
                         try:
+                            bring_window_forward(window, persistent_topmost=False)
                             messagebox.showwarning(APP_TITLE, f"Raw imagery cleanup failed:\n{cleanup_exc}", parent=window)
                         except Exception:
                             pass
@@ -829,7 +989,8 @@ def pump_gui_logs(window: ProgressWindow) -> None:
         if getattr(window, "error_message", None):
             msg = window.error_message
             window.error_message = None
-            messagebox.showerror(APP_TITLE, msg)
+            bring_window_forward(window, persistent_topmost=False)
+            messagebox.showerror(APP_TITLE, msg, parent=window)
             window.closed = True
             window.destroy()
             return

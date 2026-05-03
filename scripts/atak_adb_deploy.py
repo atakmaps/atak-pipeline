@@ -3,19 +3,28 @@
 ATAK + plugin install over ADB, then launch the imagery pipeline via
 ``atak_downloader_from_installer.py`` (not the standalone Imagery Downloader entry).
 
-Configuration (environment variables):
+Configuration (environment variables — in ``deploy.env`` at the project root):
 
-  ATAK_DEPLOY_MANIFEST_URL — required for USB install. Set it in deploy.env at
-    the project root (uncommented KEY=value lines) or in the process environment.
-    The installer copies deploy.env.example to deploy.env on first run.
-    Manifest JSON shape, for example:
+  **Easiest (no JSON file):** set both of these:
+
+  ATAK_CIV_APK_URL — full ``https://...`` link to the **ATAK CIv .apk** file your team hosts.
+  ATAK_CIV_VERSION — version label for reporting (e.g. ``5.2.0``). Can match Play Store / release notes.
+
+  **Advanced (one “setup” JSON file on your server):** instead of the two lines above, set
+
+  ATAK_DEPLOY_MANIFEST_URL — HTTPS URL to a small JSON file listing ``atak_apk_url`` and
+    ``atak_version`` (and optionally ``plugin_apk_url``). Your server admin creates this once.
+
+    Example JSON:
       {
         "atak_version": "5.2.0",
         "atak_apk_url": "/releases/atak.apk",
         "plugin_apk_url": "/releases/plugin.apk"
       }
-    Relative URLs are resolved against the manifest URL. You may omit
-    plugin_apk_url when using ATAK_PLUGIN_GITHUB_REPO or other env sources.
+    Relative paths are resolved against the manifest URL. You may omit ``plugin_apk_url`` when
+    using ATAK_PLUGIN_GITHUB_REPO or other env sources.
+
+  If both ATAK_DEPLOY_MANIFEST_URL and ATAK_CIV_* are set, the manifest URL wins.
 
   ATAK_DEPLOY_REPORT_URL — optional. Receives POST JSON when installs progress:
       After ATAK install (phase "atak_installed"):
@@ -53,11 +62,6 @@ If adb reports INSTALL_FAILED_VERSION_DOWNGRADE (APK versionCode lower than the
   installed app), the installer retries with ``adb install --allow-downgrade -r``.
   If the phone's package manager does not support that flag (IllegalArgumentException /
   Unknown option), it retries again with the legacy ``-d`` flag (``adb install -d -r``).
-
-DEBUG — REMOVE BEFORE RELEASE (do not ship; remove before pushing a release):
-  DeployWizard shows one temporary “Skip (debug)” button on the Installing ATAK and
-  Installing plugin steps (same widget position; command switches) to bypass those APK installs
-  while testing the rest of the wizard (_on_debug_skip_atak_install, _on_debug_skip_plugin_install).
 """
 
 from __future__ import annotations
@@ -108,6 +112,15 @@ ATAK_POST_INSTALL_SETUP_INSTRUCTIONS = (
     "14. Select “Continue” on this window. Allow ATAK to install the plugin.\n\n"
     "Leave ATAK open on the main map.\n\n"
     "When setup is complete, select Continue."
+)
+
+# After plugin APK is installed: pause before starting the imagery downloader.
+ATAK_POST_PLUGIN_SETUP_INSTRUCTIONS = (
+    "Plugin install is complete.\n\n"
+    "Please select OK on your device to install the plugin.\n\n"
+    "When you select Continue, the ATAK Imagery Downloader will open next to download "
+    "map tiles and terrain. That may take a while depending on what you select.\n\n"
+    "Select Continue when you are ready."
 )
 
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
@@ -267,6 +280,23 @@ def fetch_manifest(url: str) -> Dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("Manifest must be a JSON object")
     return data
+
+
+def parse_inline_atak_from_env() -> Tuple[Optional[Dict[str, Any]], str]:
+    """
+    Simple deploy: ATAK_CIV_APK_URL (full URL to .apk) + ATAK_CIV_VERSION in deploy.env.
+    Returns (manifest-shaped dict, base URL for resolve_url) or (None, '') if not configured.
+    """
+    apk = env_optional("ATAK_CIV_APK_URL")
+    ver = env_optional("ATAK_CIV_VERSION")
+    if not apk or not ver:
+        return None, ""
+    p = urllib.parse.urlparse(apk)
+    if p.scheme in ("http", "https") and p.netloc:
+        base = f"{p.scheme}://{p.netloc}/"
+    else:
+        base = "https://local.invalid/"
+    return {"atak_version": ver, "atak_apk_url": apk}, base
 
 
 def github_release_api_headers() -> Dict[str, str]:
@@ -537,14 +567,16 @@ class DeployWizard(tk.Tk):
         self.configure(cursor="arrow")
         self.selected_serial: Optional[str] = None
         self.manifest_url = env_optional("ATAK_DEPLOY_MANIFEST_URL")
+        self._inline_atak_manifest, self._inline_resolve_base = parse_inline_atak_from_env()
+        if self.manifest_url:
+            self._inline_atak_manifest = None
+            self._inline_resolve_base = ""
         self.report_url = env_optional("ATAK_DEPLOY_REPORT_URL")
         self._atak_apk_temp: Optional[Path] = None
         self._plugin_apk_temp: Optional[Path] = None
         self._manifest_cache: Optional[Dict[str, Any]] = None
         self._atak_version_value = ""
         self._plugin_report_label = ""
-        self._debug_skip_atak_pending = False
-        self._debug_skip_plugin_pending = False
 
         outer = tk.Frame(self, padx=16, pady=16)
         outer.configure(cursor="arrow")
@@ -573,8 +605,6 @@ class DeployWizard(tk.Tk):
         self.btn_primary.pack(side="right", padx=(8, 0))
         self.btn_secondary = tk.Button(self.btn_row, text="Quit", width=10, command=self.destroy)
         self.btn_secondary.pack(side="right")
-        # DEBUG: remove Skip (debug) before release — see module docstring.
-        self.btn_skip_debug = tk.Button(self.btn_row, text="Skip (debug)", fg="darkred")
 
         self.progress = ttk.Progressbar(self.footer, mode="indeterminate")
         try:
@@ -593,6 +623,14 @@ class DeployWizard(tk.Tk):
         self._step = 0
         self._render_step()
 
+    def _atak_install_ready(self) -> bool:
+        return bool(self.manifest_url) or bool(self._inline_atak_manifest)
+
+    def _resolve_url_base(self) -> str:
+        if self.manifest_url:
+            return self.manifest_url
+        return self._inline_resolve_base or ""
+
     def _set_busy(self, busy: bool) -> None:
         self.btn_primary.configure(state=("disabled" if busy else "normal"))
 
@@ -600,35 +638,30 @@ class DeployWizard(tk.Tk):
         self._instructions_outer.pack_forget()
         self.body.pack(fill="both", expand=True, pady=(0, 12), before=self.footer)
 
-    def _show_setup_instructions_panel(self) -> None:
+    def _show_instructions_panel(self, body: str) -> None:
         self.body.pack_forget()
         self._instructions_outer.pack(fill="both", expand=True, pady=(0, 12), before=self.footer)
         self._setup_scroll.configure(state="normal")
         self._setup_scroll.delete("1.0", tk.END)
-        self._setup_scroll.insert("1.0", ATAK_POST_INSTALL_SETUP_INSTRUCTIONS)
+        self._setup_scroll.insert("1.0", body)
         self._setup_scroll.configure(state="disabled")
+
+    def _show_setup_instructions_panel(self) -> None:
+        self._show_instructions_panel(ATAK_POST_INSTALL_SETUP_INSTRUCTIONS)
 
     def _render_step(self) -> None:
         self.progress.stop()
         self.progress.pack_forget()
-        self.btn_skip_debug.pack_forget()
 
         if self._step == 0:
             self._show_body_label()
             self.step_label.configure(text="")
-            extra = ""
-            if not self.manifest_url:
-                extra = (
-                    f"\n\nSet ATAK_DEPLOY_MANIFEST_URL in:\n{DEPLOY_ENV_PATH}\n"
-                    "(uncomment the line or add your URL), then run this again.\n"
-                )
             self.body.configure(
                 text=(
                     "This program is the full install assuming you have not installed ATAK or Imagery. "
                     "The installer will guide you through the process.\n\n"
                     "If you would like to add additional imagery at a later time, run the ATAK Imagery Downloader "
                     "application, as it does not include ATAK installation."
-                    + extra
                 )
             )
             self.btn_primary.configure(text="Continue", command=lambda: self._advance(1))
@@ -655,8 +688,6 @@ class DeployWizard(tk.Tk):
                 text="Downloading the ATAK build from your server and installing it with adb."
             )
             self.progress.pack(fill="x", pady=(8, 0), before=self.status)
-            self.btn_skip_debug.configure(command=self._on_debug_skip_atak_install)
-            self.btn_skip_debug.pack(side="left", padx=(0, 8))
             self.btn_primary.configure(state="disabled", text="Working…")
             self._begin_install_atak()
 
@@ -671,12 +702,19 @@ class DeployWizard(tk.Tk):
             self.step_label.configure(text="Installing plugin")
             self.body.configure(text="Installing the ATAK plugin from your build.")
             self.progress.pack(fill="x", pady=(8, 0), before=self.status)
-            self.btn_skip_debug.configure(command=self._on_debug_skip_plugin_install)
-            self.btn_skip_debug.pack(side="left", padx=(0, 8))
             self.btn_primary.configure(state="disabled", text="Working…")
             self._begin_install_plugin()
 
+        elif self._step == 5:
+            self._show_instructions_panel(ATAK_POST_PLUGIN_SETUP_INSTRUCTIONS)
+            self.step_label.configure(text="Almost done")
+            self.btn_primary.configure(
+                state="normal", text="Continue", command=self._finish_and_launch_downloader
+            )
+            self.status.configure(text="")
+
     def _on_primary(self) -> None:
+        """Placeholder; _render_step sets the real Continue handler each step."""
         pass
 
     def _advance(self, n: int) -> None:
@@ -684,12 +722,14 @@ class DeployWizard(tk.Tk):
         self._render_step()
 
     def _step_connect_check(self) -> None:
-        if not self.manifest_url:
+        if not self._atak_install_ready():
             messagebox.showerror(
                 APP_TITLE,
-                f"ATAK_DEPLOY_MANIFEST_URL is not set.\n\n"
-                f"Edit this file and add your manifest URL (not commented):\n{DEPLOY_ENV_PATH}\n\n"
-                f"Same folder: deploy.env.example shows the expected format.",
+                "ATAK install links are not configured yet.\n\n"
+                f"Edit this file with a text editor (see deploy.env.example in the same folder):\n"
+                f"{DEPLOY_ENV_PATH}\n\n"
+                "Set either ATAK_CIV_APK_URL + ATAK_CIV_VERSION, or ATAK_DEPLOY_MANIFEST_URL.\n"
+                "Then start this installer again.",
             )
             return
 
@@ -764,9 +804,13 @@ class DeployWizard(tk.Tk):
         def work() -> None:
             err: List[Optional[Exception]] = [None]
             try:
-                manifest = fetch_manifest(self.manifest_url)
+                base = self._resolve_url_base()
+                if self._inline_atak_manifest:
+                    manifest = self._inline_atak_manifest
+                else:
+                    manifest = fetch_manifest(self.manifest_url)
                 self.after(0, lambda m=manifest: setattr(self, "_manifest_cache", m))
-                apk_path, version, is_temp = resolve_atak_apk(manifest, self.manifest_url)
+                apk_path, version, is_temp = resolve_atak_apk(manifest, base)
                 self._atak_apk_temp = apk_path if is_temp else None
                 self._atak_version_value = str(version)
 
@@ -799,44 +843,7 @@ class DeployWizard(tk.Tk):
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _on_debug_skip_atak_install(self) -> None:
-        """Bypass ATAK APK download/install for local wizard debugging. REMOVE before release."""
-        log("DEBUG: Skip (debug) — bypassing ATAK download/install")
-        self._debug_skip_atak_pending = True
-        try:
-            self.progress.stop()
-        except Exception:
-            pass
-        if not self._atak_version_value:
-            self._atak_version_value = "debug-skip"
-        if not self._manifest_cache and self.manifest_url:
-            try:
-                self._manifest_cache = fetch_manifest(self.manifest_url)
-            except Exception as exc:
-                log(f"DEBUG skip: could not prefetch manifest (plugin step may fetch later): {exc}")
-        self._advance(3)
-
-    def _on_debug_skip_plugin_install(self) -> None:
-        """Bypass plugin APK download/install for local wizard debugging. REMOVE before release."""
-        log("DEBUG: Skip (debug) — bypassing plugin download/install")
-        self._debug_skip_plugin_pending = True
-        try:
-            self.progress.stop()
-        except Exception:
-            pass
-        if not self._plugin_report_label:
-            self._plugin_report_label = "debug-skip"
-        self._finish_and_launch_downloader()
-
     def _after_install_atak(self, err: Optional[Exception]) -> None:
-        if self._debug_skip_atak_pending:
-            self._debug_skip_atak_pending = False
-            try:
-                self.progress.stop()
-            except Exception:
-                pass
-            return
-
         if err:
             self.progress.stop()
             self._step = 0
@@ -862,8 +869,15 @@ class DeployWizard(tk.Tk):
                 except Exception:
                     log("launch_atak before plugin install failed")
 
-                manifest = self._manifest_cache or fetch_manifest(self.manifest_url)
-                apk_path, report_label, is_temp = resolve_plugin_apk(manifest, self.manifest_url)
+                manifest = self._manifest_cache
+                if manifest is None:
+                    if self.manifest_url:
+                        manifest = fetch_manifest(self.manifest_url)
+                    elif self._inline_atak_manifest:
+                        manifest = dict(self._inline_atak_manifest)
+                    else:
+                        raise RuntimeError("No ATAK deploy configuration")
+                apk_path, report_label, is_temp = resolve_plugin_apk(manifest, self._resolve_url_base())
                 self._plugin_apk_temp = apk_path if is_temp else None
                 self._plugin_report_label = report_label
 
@@ -893,14 +907,6 @@ class DeployWizard(tk.Tk):
 
     def _after_install_plugin(self, err: Optional[Exception]) -> None:
         self.progress.stop()
-        if self._debug_skip_plugin_pending:
-            self._debug_skip_plugin_pending = False
-            try:
-                self.progress.stop()
-            except Exception:
-                pass
-            return
-
         if err:
             self._cleanup_temp_apks()
             messagebox.showerror(APP_TITLE, f"Could not install plugin:\n{err}")
@@ -908,7 +914,7 @@ class DeployWizard(tk.Tk):
             self._render_step()
             return
         self._cleanup_temp_apks()
-        self._finish_and_launch_downloader()
+        self._advance(5)
 
     def _finish_and_launch_downloader(self) -> None:
         """Start imagery pipeline (installer entry: skips standalone downloader intro/exit UI)."""

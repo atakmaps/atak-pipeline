@@ -1,16 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VENV_DIR="$ROOT/.venv"
-LAUNCHER="$ROOT/run_atak_pipeline.sh"
-DEVICE_LAUNCHER="$ROOT/run_atak_pipeline_with_device.sh"
+# Bundle you extracted or cloned (e.g. ~/Downloads/atak-imagery). Used only as a source copy.
+# After a successful install, this folder is removed automatically when it is
+# ~/Downloads/atak-imagery (name must be atak-imagery). Set ATAK_INSTALL_KEEP_SOURCE=1 to keep it.
+# Other locations: zenity asks whether to remove; without zenity, a hint is printed.
+SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Persistent install location (not Downloads). Override: export ATAK_PIPELINE_HOME=/path
+DEFAULT_INSTALL="${XDG_DATA_HOME:-$HOME/.local/share}/atak-imagery"
+INSTALL_ROOT="${ATAK_PIPELINE_HOME:-$DEFAULT_INSTALL}"
+
+VENV_DIR="$INSTALL_ROOT/.venv"
+LAUNCHER="$INSTALL_ROOT/run_atak_pipeline.sh"
+DEVICE_LAUNCHER="$INSTALL_ROOT/run_atak_pipeline_with_device.sh"
 DESKTOP_FILE_NAME="ATAK Imagery Downloader.desktop"
 DESKTOP_FILE_NAME_DEVICE="ATAK Device Installer.desktop"
 APP_NAME="ATAK Imagery Downloader"
 APP_NAME_DEVICE="ATAK Device Installer"
 
-echo "[1/7] Using project root: $ROOT"
+# Default sources for ATAK Device Installer (USB). Forks can override before running:
+#   ATAK_BUNDLE_MANIFEST_URL=... ATAK_BUNDLE_PLUGIN_REPO=... bash install_linux.sh
+ATAK_BUNDLE_MANIFEST_URL="${ATAK_BUNDLE_MANIFEST_URL:-http://31.220.30.74/atak/manifest.json}"
+ATAK_BUNDLE_PLUGIN_REPO="${ATAK_BUNDLE_PLUGIN_REPO:-atakmaps/TAK-UV-PRO}"
 
 deb_installed() {
     local pkg="$1"
@@ -27,6 +39,84 @@ pacman_installed() {
     pacman -Qi "$1" &>/dev/null
 }
 
+# Copy application tree into INSTALL_ROOT (excludes venv and junk). Preserves existing deploy.env.
+sync_bundle_into_install_dir() {
+    local src dest
+    src="$(cd "$SOURCE_ROOT" && pwd -P)"
+    dest="$(mkdir -p "$INSTALL_ROOT" && cd "$INSTALL_ROOT" && pwd -P)"
+    if [ "$src" = "$dest" ]; then
+        echo "  Source and install directory are the same; skipping file copy."
+        return 0
+    fi
+
+    local deploy_bak=""
+    if [ -f "$dest/deploy.env" ]; then
+        deploy_bak="$(mktemp)"
+        cp -a "$dest/deploy.env" "$deploy_bak"
+    fi
+
+    echo "  From: $src"
+    echo "  To:   $dest"
+    mkdir -p "$dest"
+
+    if command -v rsync >/dev/null 2>&1; then
+        rsync -a "$src/" "$dest/" \
+            --exclude '.venv' \
+            --exclude '__pycache__' \
+            --exclude '.git' \
+            --exclude 'logs' \
+            --exclude 'scripts/logs' \
+            --exclude '.mypy_cache' \
+            --exclude '.pytest_cache' \
+            --exclude 'dist' \
+            --exclude 'build' \
+            --exclude 'output' \
+            --exclude '.cursor'
+    else
+        # tar if rsync is missing (should be rare once packaged)
+        tar -C "$src" \
+            --exclude='.venv' \
+            --exclude='__pycache__' \
+            --exclude='.git' \
+            --exclude='logs' \
+            --exclude='scripts/logs' \
+            --exclude='.mypy_cache' \
+            --exclude='.pytest_cache' \
+            --exclude='dist' \
+            --exclude='build' \
+            --exclude='output' \
+            --exclude='.cursor' \
+            -cf - . | tar -C "$dest" -xf -
+    fi
+
+    if [ -n "$deploy_bak" ] && [ -f "$deploy_bak" ]; then
+        mv "$deploy_bak" "$dest/deploy.env"
+    fi
+}
+
+# Ensure deploy.env lists where to download ATAK (manifest) and the plugin (GitHub repo).
+append_deploy_env_defaults() {
+    local f="$ROOT/deploy.env"
+    mkdir -p "$(dirname "$f")"
+    touch "$f"
+    if ! grep -qE "^[[:space:]]*ATAK_DEPLOY_MANIFEST_URL=" "$f" 2>/dev/null; then
+        {
+            echo ""
+            echo "# Default ATAK release JSON (install_linux.sh). Change only if you host your own."
+            echo "ATAK_DEPLOY_MANIFEST_URL=$ATAK_BUNDLE_MANIFEST_URL"
+        } >> "$f"
+    fi
+    if ! grep -qE "^[[:space:]]*ATAK_PLUGIN_GITHUB_REPO=" "$f" 2>/dev/null; then
+        echo "ATAK_PLUGIN_GITHUB_REPO=$ATAK_BUNDLE_PLUGIN_REPO" >> "$f"
+    fi
+}
+
+echo "[1/7] Install location: $INSTALL_ROOT"
+echo "      (Override with ATAK_PIPELINE_HOME if needed.)"
+sync_bundle_into_install_dir
+
+ROOT="$INSTALL_ROOT"
+
 echo "[2/7] Checking required system packages..."
 
 if command -v apt >/dev/null 2>&1; then
@@ -37,7 +127,7 @@ if command -v apt >/dev/null 2>&1; then
     fi
 
     PY_VER="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-    apt_pkgs=(python3 python3-pip python3-tk zenity adb "python${PY_VER}-venv")
+    apt_pkgs=(python3 python3-pip python3-tk zenity adb rsync "python${PY_VER}-venv")
     apt_missing=()
     for pkg in "${apt_pkgs[@]}"; do
         if ! deb_installed "$pkg"; then
@@ -54,7 +144,7 @@ if command -v apt >/dev/null 2>&1; then
     fi
 
 elif command -v dnf >/dev/null 2>&1; then
-    dnf_pkgs=(python3 python3-pip python3-virtualenv python3-tkinter zenity android-tools)
+    dnf_pkgs=(python3 python3-pip python3-virtualenv python3-tkinter zenity android-tools rsync)
     dnf_missing=()
     for pkg in "${dnf_pkgs[@]}"; do
         if ! rpm_installed "$pkg"; then
@@ -70,7 +160,7 @@ elif command -v dnf >/dev/null 2>&1; then
     fi
 
 elif command -v pacman >/dev/null 2>&1; then
-    pac_pkgs=(python python-pip python-virtualenv tk zenity android-tools)
+    pac_pkgs=(python python-pip python-virtualenv tk zenity android-tools rsync)
     pac_missing=()
     for pkg in "${pac_pkgs[@]}"; do
         if ! pacman_installed "$pkg"; then
@@ -95,7 +185,7 @@ fi
 venv_python="$VENV_DIR/bin/python"
 venv_created=0
 
-echo "[3/7] Virtual environment..."
+echo "[3/7] Virtual environment in install directory..."
 
 if [ -x "$venv_python" ]; then
     if "$venv_python" -c "import geopandas, shapely, rasterio, numpy, requests" &>/dev/null; then
@@ -129,6 +219,8 @@ fi
 if [ ! -f "$ROOT/deploy.env" ] && [ -f "$ROOT/deploy.env.example" ]; then
     cp "$ROOT/deploy.env.example" "$ROOT/deploy.env"
 fi
+append_deploy_env_defaults
+echo "  deploy.env: default ATAK manifest + plugin GitHub repo (edit or override env if you fork)."
 
 echo "[5/7] Creating runtime launchers..."
 cat > "$LAUNCHER" <<LAUNCHER_EOF
@@ -187,22 +279,92 @@ StartupNotify=true
     fi
 }
 
-echo "[6/7] Creating desktop launchers..."
+# Remove the extracted bundle after install (app lives in INSTALL_ROOT). Safe: cd out first.
+maybe_remove_source_extract() {
+    if [ "$SOURCE_ROOT" = "$INSTALL_ROOT" ]; then
+        return 0
+    fi
+    local src_p inst_p downloads_p
+    src_p="$(cd "$SOURCE_ROOT" && pwd -P 2>/dev/null)" || return 0
+    inst_p="$(cd "$INSTALL_ROOT" && pwd -P 2>/dev/null)" || return 0
+    if [ "$src_p" = "$inst_p" ]; then
+        return 0
+    fi
+
+    downloads_p=""
+    if [ -d "$HOME/Downloads" ]; then
+        downloads_p="$(cd "$HOME/Downloads" && pwd -P 2>/dev/null)" || true
+    fi
+
+    local do_remove=0
+    if [ -n "$downloads_p" ] && [[ "$src_p" == "$downloads_p"/* ]]; then
+        case "$(basename "$src_p")" in
+            atak-imagery)
+                do_remove=1
+                ;;
+        esac
+    fi
+
+    if [ "${ATAK_INSTALL_KEEP_SOURCE:-}" = "1" ]; then
+        echo "  Setup folder kept (ATAK_INSTALL_KEEP_SOURCE=1): $src_p"
+        return 0
+    fi
+
+    if [ "$do_remove" -eq 0 ] && command -v zenity >/dev/null 2>&1; then
+        if zenity --question \
+            --title="ATAK Imagery installer" \
+            --text="Remove the folder you ran the installer from?\n\n$src_p\n\nThe application is installed in:\n$inst_p" \
+            --width=480 2>/dev/null; then
+            do_remove=1
+        else
+            echo "  Kept setup folder: $src_p"
+            return 0
+        fi
+    elif [ "$do_remove" -eq 0 ]; then
+        echo "  You may delete the setup folder when finished:"
+        echo "    rm -rf '$src_p'"
+        return 0
+    fi
+
+    if [ "$do_remove" -eq 1 ]; then
+        cd "$HOME" 2>/dev/null || cd / || true
+        rm -rf "$src_p"
+        echo "  Removed setup folder: $src_p"
+        REMOVED_SOURCE_EXTRACT=1
+    fi
+}
+
+REMOVED_SOURCE_EXTRACT=0
+
+echo "[6/7] Creating desktop shortcuts..."
 write_desktop_shortcut "$DESKTOP_FILE_NAME" "$APP_NAME" "Download maps and build packages for ATAK" \
-    "/bin/bash -lc 'cd \"$ROOT\" && nohup ./run_atak_pipeline.sh >/tmp/atak_pipeline_launcher.log 2>&1 &'"
+    "/bin/bash -lc 'cd \"$ROOT\" && nohup \"$ROOT/run_atak_pipeline.sh\" >/tmp/atak_pipeline_launcher.log 2>&1 &'"
 write_desktop_shortcut "$DESKTOP_FILE_NAME_DEVICE" "$APP_NAME_DEVICE" "Install ATAK and plugin on Android, then run the map pipeline" \
-    "/bin/bash -lc 'cd \"$ROOT\" && nohup ./run_atak_pipeline_with_device.sh >/tmp/atak_pipeline_device_launcher.log 2>&1 &'"
+    "/bin/bash -lc 'cd \"$ROOT\" && nohup \"$ROOT/run_atak_pipeline_with_device.sh\" >/tmp/atak_pipeline_device_launcher.log 2>&1 &'"
 
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$HOME/.local/share/applications" >/dev/null 2>&1 || true
 fi
 
+maybe_remove_source_extract
+
 echo "[7/7] Installation complete."
-echo "Desktop launchers: \"$DESKTOP_FILE_NAME\" (imagery) and \"$DESKTOP_FILE_NAME_DEVICE\" (device installer)."
+echo "  Programs installed under: $ROOT"
+if [ "${REMOVED_SOURCE_EXTRACT:-0}" -eq 1 ]; then
+    echo "  Extracted setup folder under Downloads was removed."
+else
+    echo "  Re-run this installer from a new release zip to update."
+fi
+echo "  Desktop shortcuts: \"$DESKTOP_FILE_NAME\" and \"$DESKTOP_FILE_NAME_DEVICE\"."
+
+ZENITY_EXTRA=""
+if [ "${REMOVED_SOURCE_EXTRACT:-0}" -eq 1 ]; then
+    ZENITY_EXTRA="\n\nThe extracted setup folder was removed (the app stays in the install location above)."
+fi
 
 if command -v zenity >/dev/null 2>&1; then
     zenity --info \
         --title="ATAK Imagery installer" \
-        --text="Installation complete. Nothing was started automatically.\n\nThe first time, open:\n\n• ATAK Device Installer\n  — USB install of ATAK and your plugin, then the map tools.\n\nLater, for more imagery on a device that already has ATAK:\n\n• ATAK Imagery Downloader\n  — download maps and build packages only." \
-        --width=480 >/dev/null 2>&1 || true
+        --text="Installation complete.\n\nApplications are installed in:\n$ROOT\n\nThis folder is separate from where you extracted the zip.${ZENITY_EXTRA}\n\nThe first time, open ATAK Device Installer (USB install of ATAK and your plugin, then the map tools).\n\nLater, for more imagery: ATAK Imagery Downloader." \
+        --width=520 >/dev/null 2>&1 || true
 fi

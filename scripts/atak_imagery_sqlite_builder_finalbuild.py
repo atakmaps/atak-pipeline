@@ -16,6 +16,8 @@ Behavior:
 - Imports ALL numeric zoom folders present under the selected source folder
 - When multiple state folders are present under the imagery root, writes one
   ATAK_SQL_<State>.sqlite per state under ATAK_Upload_<date>/ (no time in filenames)
+- If .last_imagery_session_states.txt exists (written by the imagery downloader), only
+  those state folders are built so old Imagery/<State>/ trees do not create extra SQL files.
 - Safe to re-run: duplicate tiles are replaced, not duplicated
 - GUI-first workflow with folder dialogs and a live log window
 - GUI auto-creates an ATAK export folder named atak_<StateName>
@@ -60,7 +62,38 @@ DEFAULT_PROVIDER = "USGSImageryOnly"
 DEFAULT_SRID = "3857"
 LOG_DIR = Path.home() / ".atak_pipeline_logs"
 BATCH_SIZE = 1000
-LAST_IMAGERY_ROOT_FILE = Path(__file__).resolve().parent / ".last_imagery_root.txt"
+
+if getattr(sys, "frozen", False):
+    RUNTIME_STATE_DIR = Path(sys.executable).resolve().parent
+else:
+    RUNTIME_STATE_DIR = Path(__file__).resolve().parent
+
+LAST_IMAGERY_ROOT_FILE = RUNTIME_STATE_DIR / ".last_imagery_root.txt"
+LAST_IMAGERY_SESSION_STATES_FILE = RUNTIME_STATE_DIR / ".last_imagery_session_states.txt"
+
+
+def _bring_window_forward(win, *, persistent_topmost: bool = False) -> None:
+    if tk is None:
+        return
+    try:
+        win.lift()
+        win.attributes("-topmost", True)
+        win.update_idletasks()
+        try:
+            win.focus_force()
+        except tk.TclError:
+            pass
+        if not persistent_topmost:
+
+            def _clear_top() -> None:
+                try:
+                    win.attributes("-topmost", False)
+                except tk.TclError:
+                    pass
+
+            win.after(400, _clear_top)
+    except tk.TclError:
+        pass
 
 
 @dataclass
@@ -348,6 +381,36 @@ def find_state_imagery_dirs(imagery_root: Path) -> List[Path]:
     return results
 
 
+def filter_state_dirs_for_last_imagery_session(state_dirs: List[Path]) -> Tuple[List[Path], Optional[str]]:
+    """
+    After a downloader run, .last_imagery_session_states.txt lists state folder names
+    that were selected. If present, build SQLite only for those names so leftover
+    Imagery/<OtherState>/ trees from older tests do not produce extra ATAK_SQL_*.sqlite files.
+    Delete the file next to this script to build every folder under Imagery/ again.
+    """
+    path = LAST_IMAGERY_SESSION_STATES_FILE
+    if not path.is_file():
+        return state_dirs, None
+    try:
+        wanted = {ln.strip() for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()}
+    except OSError:
+        return state_dirs, None
+    if not wanted:
+        return state_dirs, None
+    filtered = [p for p in state_dirs if p.name in wanted]
+    if not filtered:
+        return state_dirs, (
+            f"{path.name} lists states that do not match any folder here; building all detected folders."
+        )
+    skipped = [p.name for p in state_dirs if p.name not in wanted]
+    note = (
+        f"Using {path.name} from the last imagery download — building only: {', '.join(sorted(wanted))}. "
+        f"Skipped folders: {', '.join(sorted(skipped))}. "
+        f"Delete {path.name} next to this script to include every folder under Imagery/."
+    )
+    return filtered, note
+
+
 def ask_directory_linux_native(title: str) -> Optional[Path]:
     try:
         if shutil.which("zenity"):
@@ -391,11 +454,12 @@ class App:
         self.imagery_root: Optional[Path] = None
         self._last_upload_dir: Optional[Path] = None
 
-        self.status_var = tk.StringVar(value="Waiting for configuration...")
+        self.status_var = tk.StringVar(value="Preparing to build…")
         self.summary_var = tk.StringVar(value="")
 
         self._build_ui()
         self.root.after(100, self._poll_logs)
+        self.root.after(250, self.start_wizard)
 
     def _build_ui(self) -> None:
         top = ttk.Frame(self.root, padding=10)
@@ -412,8 +476,7 @@ class App:
 
         btns = ttk.Frame(self.root, padding=(10, 0, 10, 10))
         btns.pack(fill="x")
-        ttk.Button(btns, text="Start Wizard", command=self.start_wizard).pack(side="left")
-        ttk.Button(btns, text="Open Log Folder", command=self.open_log_folder).pack(side="left", padx=(8, 0))
+        ttk.Button(btns, text="Open Log Folder", command=self.open_log_folder).pack(side="left")
         ttk.Button(btns, text="Exit", command=self.root.destroy).pack(side="right")
 
         log_frame = ttk.Frame(self.root, padding=10)
@@ -434,17 +497,13 @@ class App:
         self.text.configure(state="disabled")
 
     def _poll_logs(self) -> None:
-        while True:
-            try:
-                msg = self.log_queue.get_nowait()
-            except queue.Empty:
-                break
-            self.append_log(msg)
-
+        # Show completion/error as soon as it is set; do not drain a huge backlog first
+        # (that blocked the UI for a long time after the status already said "Build complete").
         if self.completion_message:
             msg = self.completion_message
             self.completion_message = None
             try:
+                _bring_window_forward(self.root, persistent_topmost=False)
                 skip_inline_dted = False
                 try:
                     from atak_dted_downloader import (
@@ -459,26 +518,33 @@ class App:
 
                 if skip_inline_dted and self.imagery_root and self._last_upload_dir:
                     consume_standalone_dted_skip()
+
+                    def _finish_after_device_deploy() -> None:
+                        try:
+                            self.root.quit()
+                            self.root.destroy()
+                        except Exception:
+                            pass
+                        sys.exit(0)
+
                     complete_device_deploy_and_imagery_cleanup(
                         self.root,
                         self._last_upload_dir,
                         None,
                         self.imagery_root,
                         dted_complete=True,
+                        on_finished=_finish_after_device_deploy,
                     )
-                    try:
-                        self.root.quit()
-                        self.root.destroy()
-                    except Exception:
-                        pass
-                    sys.exit(0)
+                    return
 
                 if skip_inline_dted:
                     consume_standalone_dted_skip()
+                    _bring_window_forward(self.root, persistent_topmost=False)
                     messagebox.showwarning(
                         "Build complete",
                         "Inline DTED was used earlier, but the upload folder could not be determined.\n\n"
                         "Push SQLite and DTED from the ATAK_Upload_* folder manually, then exit.",
+                        parent=self.root,
                     )
                     try:
                         self.root.quit()
@@ -487,7 +553,8 @@ class App:
                         pass
                     sys.exit(0)
 
-                messagebox.showinfo("Build complete", msg)
+                _bring_window_forward(self.root, persistent_topmost=False)
+                messagebox.showinfo("Build complete", msg, parent=self.root)
                 self.root.destroy()
 
                 if getattr(sys, "frozen", False):
@@ -502,15 +569,25 @@ class App:
                     subprocess.Popen([sys.executable, str(next_script)])
                     sys.exit(0)
             except Exception as exc:
-                messagebox.showerror("Build complete", f"Failed to launch DTED downloader:\n{exc}")
+                _bring_window_forward(self.root, persistent_topmost=False)
+                messagebox.showerror("Build complete", f"Failed to launch DTED downloader:\n{exc}", parent=self.root)
                 sys.exit(1)
 
         if self.error_message:
             msg = self.error_message
             self.error_message = None
-            messagebox.showerror("Build failed", msg)
+            _bring_window_forward(self.root, persistent_topmost=False)
+            messagebox.showerror("Build failed", msg, parent=self.root)
             self.root.destroy()
             return
+
+        _max_batch = 400
+        for _ in range(_max_batch):
+            try:
+                msg = self.log_queue.get_nowait()
+            except queue.Empty:
+                break
+            self.append_log(msg)
 
         self.root.after(100, self._poll_logs)
 
@@ -538,6 +615,9 @@ class App:
             return
 
         state_dirs = find_state_imagery_dirs(imagery_root)
+        state_dirs, filter_note = filter_state_dirs_for_last_imagery_session(state_dirs)
+        if filter_note:
+            self.append_log(filter_note)
         if not state_dirs:
             messagebox.showerror("No imagery found", f"No state folders with numeric zoom levels were found under:\n{imagery_root}")
             return

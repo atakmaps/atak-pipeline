@@ -49,14 +49,14 @@ After a successful run, use those desktop entries or the two shell scripts above
 
 ## Current stable release (Linux / source)
 
-**Linux / source release:** `v0.2.9` (this tag on GitHub).
+**Linux / source release:** `v1.0.0` (tag on GitHub).
 
 **Windows:** A new Windows packaged build is **not** included in this cycle. **Use Windows release `2.8`** until a newer Windows installer is published.
 
-This release includes:
+Version **1.0** highlights:
 
-- **ATAK Device Installer** (desktop entry): USB steps clarified; ATAK + plugin install over ADB; hands off to ATAK Imagery Downloader
-- **ATAK Imagery Downloader**: temporary install folder defaults to Downloads and remembers last choice; zoom dialog storage note with proper text wrapping
+- **ATAK Device Installer**: production wizard only (debug skip controls removed); post-plugin instructions including device **OK** for plugin install; **Continue** before launching the imagery downloader
+- **ATAK Imagery Downloader**: same SQLite handoff dialog when launched from the installer as in standalone; blocks **District of Columbia** as the only state selection, with an explanation; clearer errors when no states remain to download
 - **DTED step**: pushes per-state `ATAK_SQL*.sqlite` file(s) and the DTED zip to the device under `/sdcard/atak/imagery` and `/sdcard/atak/DTED` (override with `ATAK_DEVICE_FILES_ROOT`); post-build **Yes/No** raw-imagery cleanup; adb restart of ATAK and completion dialog
 - **Installer**: `deploy.env.example` seed; portable root paths in root launchers
 
