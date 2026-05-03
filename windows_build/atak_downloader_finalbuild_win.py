@@ -960,7 +960,9 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
                 progress.set_status(f"Scanning {state_name} zoom {z}...")
                 tiles = build_tiles_for_state(rings, z)
                 log(f"Planned {len(tiles)} tiles for {state_name}, zoom {z}")
-                for x, y in tiles:
+                for i, (x, y) in enumerate(tiles, start=1):
+                    if i % 2048 == 0:
+                        progress.wait_if_paused()
                     out_path = output_root / state_name / str(z) / str(x) / f"{y}.jpg"
                     plan.append((state_name, z, x, y, out_path))
 
@@ -996,10 +998,12 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
             while future_to_tile:
                 progress.wait_if_paused()
                 done, _ = wait(list(future_to_tile.keys()), timeout=0.2, return_when=FIRST_COMPLETED)
+                progress.wait_if_paused()
                 if not done:
                     continue
 
                 for future in done:
+                    progress.wait_if_paused()
                     tile = future_to_tile.pop(future)
                     state_name, z, x, y, out_path = tile
                     progress.set_status(f"Downloading {state_name} | zoom {z} | x={x} y={y}")
