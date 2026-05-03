@@ -49,9 +49,11 @@ After a successful run, use those desktop entries or the two shell scripts above
 
 ## Current stable release (Linux / source)
 
-**Linux / source release:** `v1.0.0` (tag on GitHub).
+**Linux / source release:** `v1.0.1` (tag on GitHub).
 
 **Windows:** A new Windows packaged build is **not** included in this cycle. **Use Windows release `2.8`** until a newer Windows installer is published.
+
+**v1.0.1** is a patch release (version bookkeeping); pipeline behavior matches **v1.0.0**.
 
 Version **1.0** highlights:
 
