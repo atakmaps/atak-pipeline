@@ -77,7 +77,7 @@ except Exception:  # pragma: no cover
     scrolledtext = None
     ttk = None
 
-APP_TITLE = "ATAK Device Install"
+APP_TITLE = "ATAK Device Installer"
 DEFAULT_ATAK_PACKAGE = "com.atakmap.app.civ"
 
 # After ATAK APK is installed: show this while the user completes first-run on device.

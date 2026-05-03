@@ -6,9 +6,9 @@ VENV_DIR="$ROOT/.venv"
 LAUNCHER="$ROOT/run_atak_pipeline.sh"
 DEVICE_LAUNCHER="$ROOT/run_atak_pipeline_with_device.sh"
 DESKTOP_FILE_NAME="ATAK Imagery Downloader.desktop"
-DESKTOP_FILE_NAME_DEVICE="ATAK Device Install.desktop"
+DESKTOP_FILE_NAME_DEVICE="ATAK Device Installer.desktop"
 APP_NAME="ATAK Imagery Downloader"
-APP_NAME_DEVICE="ATAK Device Install"
+APP_NAME_DEVICE="ATAK Device Installer"
 
 echo "[1/7] Using project root: $ROOT"
 
@@ -198,11 +198,11 @@ if command -v update-desktop-database >/dev/null 2>&1; then
 fi
 
 echo "[7/7] Installation complete."
-echo "Desktop launchers: \"$DESKTOP_FILE_NAME\" (imagery) and \"$DESKTOP_FILE_NAME_DEVICE\" (device install)."
+echo "Desktop launchers: \"$DESKTOP_FILE_NAME\" (imagery) and \"$DESKTOP_FILE_NAME_DEVICE\" (device installer)."
 
 if command -v zenity >/dev/null 2>&1; then
     zenity --info \
         --title="ATAK Imagery installer" \
-        --text="Installation complete. Nothing was started automatically.\n\nThe first time, open:\n\n• ATAK Device Install\n  — USB install of ATAK and your plugin, then the map tools.\n\nLater, for more imagery on a device that already has ATAK:\n\n• ATAK Imagery Downloader\n  — download maps and build packages only." \
+        --text="Installation complete. Nothing was started automatically.\n\nThe first time, open:\n\n• ATAK Device Installer\n  — USB install of ATAK and your plugin, then the map tools.\n\nLater, for more imagery on a device that already has ATAK:\n\n• ATAK Imagery Downloader\n  — download maps and build packages only." \
         --width=480 >/dev/null 2>&1 || true
 fi
