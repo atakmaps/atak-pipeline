@@ -57,7 +57,7 @@ This release includes:
 
 - **ATAK Device Installer** (desktop entry): USB steps clarified; ATAK + plugin install over ADB; hands off to ATAK Imagery Downloader
 - **ATAK Imagery Downloader**: temporary install folder defaults to Downloads and remembers last choice; zoom dialog storage note with proper text wrapping
-- **DTED step**: pushes merged SQLite and DTED zip to the device under `/sdcard/atak/imagery` and `/sdcard/atak/DTED` (override with `ATAK_DEVICE_FILES_ROOT`); post-build **Yes/No** raw-imagery cleanup; adb restart of ATAK and completion dialog
+- **DTED step**: pushes per-state `ATAK_SQL*.sqlite` file(s) and the DTED zip to the device under `/sdcard/atak/imagery` and `/sdcard/atak/DTED` (override with `ATAK_DEVICE_FILES_ROOT`); post-build **Yes/No** raw-imagery cleanup; adb restart of ATAK and completion dialog
 - **Installer**: `deploy.env.example` seed; portable root paths in root launchers
 
 ---

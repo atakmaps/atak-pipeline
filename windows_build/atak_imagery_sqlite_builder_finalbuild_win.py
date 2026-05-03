@@ -331,6 +331,12 @@ def derive_output_name(source_dir: Path) -> str:
     return f"{cleaned}.sqlite"
 
 
+def atak_upload_sqlite_path(upload_dir: Path, state_folder_name: str) -> Path:
+    """Per-state DB in the upload folder: ATAK_SQL_<sanitized_name>.sqlite (no timestamp)."""
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", state_folder_name.strip()) or "state"
+    return upload_dir / f"ATAK_SQL_{stem}.sqlite"
+
+
 def derive_atak_folder_name(source_dir: Path) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", source_dir.name.strip()) or "imagery"
     return f"atak_{cleaned}"
@@ -537,25 +543,23 @@ class App:
             total = len(state_dirs)
             built = 0
 
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             date_str = datetime.now().strftime("%Y%m%d")
 
             upload_dir = out_parent / f"ATAK_Upload_{date_str}"
             upload_dir.mkdir(parents=True, exist_ok=True)
 
-            merged_sqlite = upload_dir / f"ATAK_SQL_{ts}.sqlite"
-
-            self.append_log(f"Merged SQLite target: {merged_sqlite}")
+            self.append_log(f"Upload folder: {upload_dir}")
 
             for idx, source_dir in enumerate(state_dirs, start=1):
                 self.status_var.set(f"Running {idx}/{total}: {source_dir.name}")
                 self.append_log("")
-                self.append_log(f"[{idx}/{total}] Adding state: {source_dir.name}")
+                sqlite_path = atak_upload_sqlite_path(upload_dir, source_dir.name)
+                self.append_log(f"[{idx}/{total}] State: {source_dir.name} -> {sqlite_path.name}")
 
                 config = BuildConfig(
                     source_dir=source_dir,
                     output_dir=out_parent,
-                    sqlite_path=merged_sqlite,
+                    sqlite_path=sqlite_path,
                     provider=source_dir.name,
                 )
                 Builder(config, self.logger).run()
@@ -563,7 +567,7 @@ class App:
 
             self.status_var.set("Build complete")
             self.append_log("")
-            self.append_log(f"All state SQLite builds complete: {built}")
+            self.append_log(f"All state SQLite builds complete: {built} file(s) in {upload_dir}")
             self.completion_message = "SQLite build complete."
         except Exception as exc:
             self.status_var.set("Build failed")

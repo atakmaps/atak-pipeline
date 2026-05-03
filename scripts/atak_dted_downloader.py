@@ -56,24 +56,42 @@ def _adb_base_cmd() -> List[str]:
     return cmd
 
 
-def _find_merged_sqlite(upload_dir: Path) -> Optional[Path]:
-    if not upload_dir.is_dir():
-        return None
-    candidates = sorted(upload_dir.glob("ATAK_SQL*.sqlite"), key=lambda p: p.stat().st_mtime, reverse=True)
-    if candidates:
-        return candidates[0]
+def _find_atak_sqlite_files(upload_dir: Path) -> List[Path]:
+    """All per-state ATAK_SQL*.sqlite under upload_dir, or from the best-matching sibling ATAK_Upload_* folder."""
+
+    def sorted_in_dir(dirpath: Path) -> List[Path]:
+        if not dirpath.is_dir():
+            return []
+        return sorted(dirpath.glob("ATAK_SQL*.sqlite"), key=lambda p: p.name.lower())
+
+    direct = sorted_in_dir(upload_dir)
+    if direct:
+        return direct
+
     parent = upload_dir.parent
     if not parent.is_dir():
-        return None
-    all_sql = sorted(parent.glob("ATAK_Upload_*/ATAK_SQL*.sqlite"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return all_sql[0] if all_sql else None
+        return []
+
+    all_sql = list(parent.glob("ATAK_Upload_*/ATAK_SQL*.sqlite"))
+    if not all_sql:
+        return []
+
+    by_folder: Dict[Path, List[Path]] = {}
+    for p in all_sql:
+        by_folder.setdefault(p.parent, []).append(p)
+
+    def folder_peak_mtime(paths: List[Path]) -> float:
+        return max(x.stat().st_mtime for x in paths)
+
+    best_folder = max(by_folder.items(), key=lambda item: folder_peak_mtime(item[1]))[0]
+    return sorted(by_folder[best_folder], key=lambda p: p.name.lower())
 
 
 def adb_push_pipeline_outputs(upload_dir: Path, final_dted_zip: Path) -> Tuple[bool, str]:
-    """Push merged imagery SQLite and DTED zip to the device (default /sdcard/atak/imagery and .../DTED)."""
-    sqlite_path = _find_merged_sqlite(upload_dir)
-    if sqlite_path is None:
-        return False, f"No merged ATAK_SQL*.sqlite found (looked in {upload_dir} and sibling upload folders)."
+    """Push imagery SQLite DB file(s) and DTED zip to the device (default /sdcard/atak/imagery and .../DTED)."""
+    sqlite_paths = _find_atak_sqlite_files(upload_dir)
+    if not sqlite_paths:
+        return False, f"No ATAK_SQL*.sqlite found (looked in {upload_dir} and sibling upload folders)."
     if not final_dted_zip.is_file():
         return False, f"DTED zip not found: {final_dted_zip}"
 
@@ -81,11 +99,11 @@ def adb_push_pipeline_outputs(upload_dir: Path, final_dted_zip: Path) -> Tuple[b
     remote_imagery = f"{root.rstrip('/')}/imagery"
     remote_dted = f"{root.rstrip('/')}/DTED"
 
-    steps: List[List[str]] = [
-        _adb_base_cmd() + ["shell", "mkdir", "-p", remote_imagery, remote_dted],
-        _adb_base_cmd() + ["push", str(sqlite_path), f"{remote_imagery}/"],
-        _adb_base_cmd() + ["push", str(final_dted_zip), f"{remote_dted}/"],
-    ]
+    steps: List[List[str]] = [_adb_base_cmd() + ["shell", "mkdir", "-p", remote_imagery, remote_dted]]
+    for p in sqlite_paths:
+        steps.append(_adb_base_cmd() + ["push", str(p), f"{remote_imagery}/"])
+    steps.append(_adb_base_cmd() + ["push", str(final_dted_zip), f"{remote_dted}/"])
+
     log_lines: List[str] = []
     for cmd in steps:
         log_lines.append(" ".join(cmd))
@@ -97,8 +115,9 @@ def adb_push_pipeline_outputs(upload_dir: Path, final_dted_zip: Path) -> Tuple[b
             err = (proc.stderr or proc.stdout or "").strip()
             return False, f"{err}\n\n" + "\n".join(log_lines)
 
+    names = ", ".join(p.name for p in sqlite_paths)
     return True, (
-        f"Pushed imagery DB to {remote_imagery}/{sqlite_path.name}\n"
+        f"Pushed imagery DB file(s) to {remote_imagery}/: {names}\n"
         f"Pushed DTED archive to {remote_dted}/{final_dted_zip.name}"
     )
 
