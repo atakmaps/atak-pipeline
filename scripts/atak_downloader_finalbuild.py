@@ -658,6 +658,8 @@ class ZoomDialog(tk.Tk):
 
 
 class ProgressWindow(tk.Tk):
+    _PAUSED_STATUS_TEXT = "Paused — click Resume to continue"
+
     def __init__(self, log_path: Path):
         super().__init__()
         self.title(f"{APP_TITLE} - Progress")
@@ -703,6 +705,7 @@ class ProgressWindow(tk.Tk):
         self._paused = False
         self._cancel_requested = False
         self.user_cancelled = False
+        self._last_activity_status = "Initializing..."
         self.btn_pause = tk.Button(ctrl, text="Pause", width=12, command=self._on_pause_toggle)
         self.btn_pause.pack(side="left", padx=(0, 8))
         tk.Button(ctrl, text="Cancel", width=12, command=self._on_cancel_download).pack(side="left")
@@ -738,6 +741,8 @@ class ProgressWindow(tk.Tk):
         self.canvas.itemconfig(self.bar_text, text=f"{pct}%")
 
     def set_status(self, text: str) -> None:
+        if text != self._PAUSED_STATUS_TEXT:
+            self._last_activity_status = text
         self.status_var.set(text)
         self.update_idletasks()
 
@@ -775,7 +780,9 @@ class ProgressWindow(tk.Tk):
         try:
             self.btn_pause.configure(text=label)
             if now_paused:
-                self.set_status("Paused — click Resume to continue")
+                self.set_status(self._PAUSED_STATUS_TEXT)
+            else:
+                self.set_status(self._last_activity_status)
         except tk.TclError:
             pass
 
