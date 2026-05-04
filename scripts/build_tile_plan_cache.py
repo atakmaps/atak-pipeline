@@ -35,6 +35,41 @@ from imagery_tile_selection import (  # noqa: E402
 DATA_DIR = SCRIPT_DIR / "data"
 STATE_GEOJSON_PATH = DATA_DIR / "us_states.geojson"
 TILE_PLAN_DIR = DATA_DIR / "tile_plans" / "v1"
+ZOOM_ESTIMATE_PATH = DATA_DIR / "zoom_estimates_z10_z16.json"
+
+
+def load_zoom_tile_estimates(path: Path) -> Dict[str, Dict[int, int]]:
+    """state_name -> zoom -> estimated_tiles (from build_imagery_zoom_estimates)."""
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    out: Dict[str, Dict[int, int]] = {}
+    for state_name, per_zoom in (data.get("states") or {}).items():
+        inner: Dict[int, int] = {}
+        for zk, info in per_zoom.items():
+            try:
+                z = int(zk)
+                inner[z] = int(info.get("estimated_tiles", 0))
+            except (TypeError, ValueError):
+                continue
+        if inner:
+            out[str(state_name)] = inner
+    return out
+
+
+def sum_estimated_tiles_remaining(
+    jobs: List[Tuple[str, int]],
+    start_index: int,
+    estimates: Dict[str, Dict[int, int]],
+) -> int:
+    """Sum estimated_tiles for jobs[start_index:] (0-based)."""
+    total = 0
+    for state_name, z in jobs[start_index:]:
+        total += estimates.get(state_name, {}).get(z, 0)
+    return total
 
 
 def load_states(geojson_path: Path) -> Dict[str, List[List[Tuple[float, float]]]]:
@@ -63,6 +98,19 @@ def load_states(geojson_path: Path) -> Dict[str, List[List[Tuple[float, float]]]
     return states
 
 
+def _fmt_duration(seconds: float) -> str:
+    if seconds < 0 or not (seconds == seconds):  # NaN
+        return "—"
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    if seconds < 3600:
+        m, s = divmod(int(seconds), 60)
+        return f"{m}m {s:02d}s"
+    h, r = divmod(int(seconds), 3600)
+    m, s = divmod(r, 60)
+    return f"{h}h {m:02d}m {s:02d}s"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Build tile plan .tiles.gz caches for imagery downloader.")
     ap.add_argument(
@@ -89,6 +137,17 @@ def main() -> int:
         default=TILE_PLAN_DIR,
         help=f"Output directory (default: {TILE_PLAN_DIR})",
     )
+    ap.add_argument(
+        "--eta-scale",
+        type=float,
+        default=0.58,
+        metavar="F",
+        help=(
+            "Scale for tile-linear scan ETA (default: 0.58). Uncorrected "
+            "(elapsed/output-tiles)×remaining-est-tiles over-predicts because low zooms finish "
+            "fast per tile; use 1.0 for raw linear extrapolation."
+        ),
+    )
     args = ap.parse_args()
 
     if not args.geojson.is_file():
@@ -111,32 +170,87 @@ def main() -> int:
 
     crc = crc32_file(args.geojson)
     buf = DEFAULT_BOUNDARY_BUFFER_M
+    state_list = sorted(states.keys())
+    jobs: List[Tuple[str, int]] = [(sn, z) for sn in state_list for z in zooms]
+    total_jobs = len(jobs)
+    zoom_estimates = load_zoom_tile_estimates(ZOOM_ESTIMATE_PATH)
+    total_est_tiles_all = sum_estimated_tiles_remaining(jobs, 0, zoom_estimates)
+    if zoom_estimates and total_est_tiles_all > 0:
+        est_note = f"~{total_est_tiles_all:,} output tiles (from {ZOOM_ESTIMATE_PATH.name}; used for ETA)"
+    else:
+        est_note = f"no tile estimates at {ZOOM_ESTIMATE_PATH.name} — ETA falls back to average time per job"
+
+    print(
+        "Note: No USGS download — only tile-index math (same as the downloader’s "
+        "“Scanning tile coverage” phase). Downloader wall time also includes network I/O.\n",
+        flush=True,
+    )
     print(
         f"GeoJSON: {args.geojson}\n"
         f"CRC-32: {crc:#010x}\n"
         f"Buffer: {STATE_BOUNDARY_BUFFER_MILES:g} mi ({buf:.1f} m)\n"
-        f"States: {len(states)}  Zooms: {zooms}\n"
+        f"States: {len(states)}  Zooms: {zooms}  Jobs: {total_jobs}\n"
+        f"Batch scope: {est_note}\n"
+        f"ETA scale (tile-linear overshoot): {args.eta_scale:g}\n"
         f"Output: {args.out_dir}\n",
         flush=True,
     )
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    state_list = sorted(states.keys())
-    for si, state_name in enumerate(state_list, start=1):
-        rings = states[state_name]
-        for z in zooms:
-            t0 = time.perf_counter()
-            tiles = _compute_tiles_for_state(rings, z, buf)
-            elapsed = time.perf_counter() - t0
-            out = args.out_dir / f"{state_name.replace('/', '_')}_z{z}.tiles.gz"
-            save_tile_plan_cache(out, z, buf, crc, tiles)
-            print(
-                f"[{si}/{len(state_list)}] {state_name} z{z}: {len(tiles):,} tiles in {elapsed:.1f}s -> {out.name}",
-                flush=True,
-            )
+    run_t0 = time.perf_counter()
+    sum_compute_s = 0.0
+    sum_out_tiles = 0
 
-    print("Done.", flush=True)
+    for k, (state_name, z) in enumerate(jobs):
+        rings = states[state_name]
+        t0 = time.perf_counter()
+        tiles = _compute_tiles_for_state(rings, z, buf)
+        elapsed_task = time.perf_counter() - t0
+        sum_compute_s += elapsed_task
+        n_out = len(tiles)
+        sum_out_tiles += n_out
+
+        out = args.out_dir / f"{state_name.replace('/', '_')}_z{z}.tiles.gz"
+        save_tile_plan_cache(out, z, buf, crc, tiles)
+
+        total_elapsed_s = time.perf_counter() - run_t0
+        job_done_idx = k + 1
+        pct = 100.0 * job_done_idx / total_jobs
+
+        if job_done_idx < total_jobs and sum_out_tiles > 0 and sum_compute_s > 0:
+            rem_est = sum_estimated_tiles_remaining(jobs, job_done_idx, zoom_estimates)
+            if rem_est > 0:
+                sec_per_tile = sum_compute_s / sum_out_tiles
+                eta_linear_s = sec_per_tile * rem_est
+                eta_s = max(0.0, eta_linear_s * args.eta_scale)
+                total_scan_est_s = total_elapsed_s + eta_s
+                eta_part = (
+                    f"scan time left ~{_fmt_duration(eta_s)} "
+                    f"(batch scan total ~{_fmt_duration(total_scan_est_s)} incl. done so far; "
+                    f"~{rem_est:,} est. output tiles left in {total_jobs - job_done_idx} job(s); "
+                    f"linear×{args.eta_scale:g} vs raw ~{_fmt_duration(eta_linear_s)})"
+                )
+            else:
+                eta_s = (sum_compute_s / job_done_idx) * (total_jobs - job_done_idx)
+                eta_part = (
+                    f"time left for full batch (job-average fallback; ~{total_jobs - job_done_idx} job(s)): "
+                    f"~{_fmt_duration(eta_s)}"
+                )
+        elif job_done_idx < total_jobs:
+            eta_part = "time left: … (need first job for ETA)"
+        else:
+            eta_part = "entire batch complete"
+
+        print(
+            f"[{job_done_idx}/{total_jobs}] ({pct:.1f}%) {state_name} z{z} | "
+            f"elapsed {_fmt_duration(total_elapsed_s)} | {eta_part} | "
+            f"{n_out:,} tiles in {elapsed_task:.1f}s → {out.name}",
+            flush=True,
+        )
+
+    total_wall = time.perf_counter() - run_t0
+    print(f"Done. {_fmt_duration(total_wall)} total for {total_jobs} cache file(s).", flush=True)
     return 0
 
 

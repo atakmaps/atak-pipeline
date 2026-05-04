@@ -82,7 +82,7 @@ LAST_IMAGERY_SESSION_STATES_FILE = RUNTIME_STATE_DIR / ".last_imagery_session_st
 
 from imagery_tile_selection import (  # noqa: E402
     STATE_BOUNDARY_BUFFER_MILES,
-    build_tiles_for_state,
+    build_tiles_for_state_result,
     lonlat_to_tile,
 )
 
@@ -1344,21 +1344,28 @@ def run_download(selected_zooms: List[int], selected_states: List[str], mode: st
         log(f"Selected states: {', '.join(state_names)}")
 
         plan: List[Tuple[str, int, int, int, Path]] = []
-        progress.set_status("Scanning tile coverage...")
+        progress.set_status("Building tile download plan…")
         for state_name in state_names:
             progress.wait_if_paused()
             rings = states[state_name]
             for z in selected_zooms:
                 progress.wait_if_paused()
-                progress.set_status(f"Scanning {state_name} zoom {z}...")
-                tiles = build_tiles_for_state(
+                progress.set_status(f"Tile plan: {state_name} zoom {z}…")
+                tpr = build_tiles_for_state_result(
                     state_name,
                     rings,
                     z,
                     geojson_path=STATE_GEOJSON_PATH,
                     tile_plan_dir=TILE_PLAN_DIR,
                 )
-                log(f"Planned {len(tiles)} tiles for {state_name}, zoom {z}")
+                tiles = tpr.tiles
+                if tpr.from_cache:
+                    log(
+                        f"Tile plan (cache): {len(tiles):,} tiles for {state_name}, zoom {z} "
+                        f"— {state_name.replace('/', '_')}_z{z}.tiles.gz"
+                    )
+                else:
+                    log(f"Tile plan (computed): {len(tiles):,} tiles for {state_name}, zoom {z}")
                 for i, (x, y) in enumerate(tiles, start=1):
                     if i % 2048 == 0:
                         progress.wait_if_paused()

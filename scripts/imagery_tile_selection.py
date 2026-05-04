@@ -18,7 +18,7 @@ import math
 import struct
 import zlib
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, NamedTuple, Optional, Tuple
 
 # Miles beyond the GeoJSON boundary to keep imagery for (edge tiles + visibility).
 STATE_BOUNDARY_BUFFER_MILES = 3.0
@@ -213,6 +213,13 @@ def tile_qualifies(
     return min_distance_point_to_rings_m(lon, lat, rings) <= boundary_buffer_m
 
 
+class TilePlanBuildResult(NamedTuple):
+    """tiles plus whether they came from a precomputed ``.tiles.gz`` cache."""
+
+    tiles: List[Tuple[int, int]]
+    from_cache: bool
+
+
 def _compute_tiles_for_state(
     rings: List[List[Tuple[float, float]]],
     zoom: int,
@@ -238,6 +245,31 @@ def _compute_tiles_for_state(
     return tiles
 
 
+def build_tiles_for_state_result(
+    state_name: str,
+    rings: List[List[Tuple[float, float]]],
+    zoom: int,
+    boundary_buffer_m: Optional[float] = None,
+    *,
+    geojson_path: Optional[Path] = None,
+    tile_plan_dir: Optional[Path] = None,
+) -> TilePlanBuildResult:
+    """
+    Like ``build_tiles_for_state`` but reports whether the list came from disk cache.
+    """
+    buf = DEFAULT_BOUNDARY_BUFFER_M if boundary_buffer_m is None else float(boundary_buffer_m)
+
+    if geojson_path is not None and tile_plan_dir is not None and geojson_path.is_file():
+        crc = crc32_file(geojson_path)
+        cache_path = _tile_plan_cache_path(tile_plan_dir, state_name, zoom)
+        cached = try_load_tile_plan_cache(cache_path, zoom, buf, crc)
+        if cached is not None:
+            return TilePlanBuildResult(cached, True)
+
+    tiles = _compute_tiles_for_state(rings, zoom, buf)
+    return TilePlanBuildResult(tiles, False)
+
+
 def build_tiles_for_state(
     state_name: str,
     rings: List[List[Tuple[float, float]]],
@@ -255,13 +287,11 @@ def build_tiles_for_state(
     cache exists (same GeoJSON CRC-32 and buffer), returns the cached list immediately.
     Otherwise computes the list (slow for large states at high zoom).
     """
-    buf = DEFAULT_BOUNDARY_BUFFER_M if boundary_buffer_m is None else float(boundary_buffer_m)
-
-    if geojson_path is not None and tile_plan_dir is not None and geojson_path.is_file():
-        crc = crc32_file(geojson_path)
-        cache_path = _tile_plan_cache_path(tile_plan_dir, state_name, zoom)
-        cached = try_load_tile_plan_cache(cache_path, zoom, buf, crc)
-        if cached is not None:
-            return cached
-
-    return _compute_tiles_for_state(rings, zoom, buf)
+    return build_tiles_for_state_result(
+        state_name,
+        rings,
+        zoom,
+        boundary_buffer_m,
+        geojson_path=geojson_path,
+        tile_plan_dir=tile_plan_dir,
+    ).tiles
