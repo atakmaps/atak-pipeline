@@ -63,7 +63,8 @@ def should_skip(path: Path) -> bool:
 def build_zip(version: str) -> Path:
     DIST_DIR.mkdir(exist_ok=True)
     label = zip_version_label(version)
-    zip_path = DIST_DIR / f"atak-imagery-v{label}-source.zip"
+    # Full bundle for Linux: unzip → atak-imagery/ → ./install_linux.sh (not minimal scripts-only zip).
+    zip_path = DIST_DIR / f"atak-imagery-v{label}-linux-install.zip"
 
     if zip_path.exists():
         zip_path.unlink()

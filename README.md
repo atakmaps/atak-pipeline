@@ -12,13 +12,13 @@ Source repository: `https://github.com/atakmaps/atak-imagery`
 
 1. Put the project on your machine and open a **terminal**:
    - **Clone:** `git clone https://github.com/atakmaps/atak-imagery.git` then `cd atak-imagery`
-   - **Release zip:** under [Releases](https://github.com/atakmaps/atak-imagery/releases), download the **`atak-imagery-v*-source.zip`** for your version from **Assets** (not the auto-generated “Source code (zip)”, which uses a different folder layout). The **Assets** zip stores every file under a root directory **`atak-imagery/`** inside the archive.
+   - **Linux install zip:** under [Releases](https://github.com/atakmaps/atak-imagery/releases), download **`atak-imagery-v*-linux-install.zip`** for your version from **Assets** (not the auto-generated “Source code (zip)”, which uses a different folder layout). The **Assets** zip stores every file under a root directory **`atak-imagery/`** inside the archive.
 
      Run `unzip` in the **same directory as the `.zip` file** (a **parent** folder—usually `Downloads`). That directory will gain a **`atak-imagery`** folder next to the zip:
 
      ```bash
      cd ~/Downloads
-     unzip atak-imagery-v1.1.0-source.zip
+     unzip atak-imagery-v1.1.0-linux-install.zip
      ls atak-imagery/install_linux.sh
      cd atak-imagery
      chmod +x install_linux.sh
@@ -63,7 +63,7 @@ Version **1.1** highlights:
 
 - **Screen-aware Tk windows** (`scripts/tk_window_scaling.py`): main dialogs scale to fit small laptops and grow modestly on large displays (Device Installer, Imagery Downloader, SQLite builder, DTED downloader — Linux and `windows_build` copies).
 - **Optional in-app update check** (`scripts/git_update_check.py`): when running from a **git clone** (not a frozen EXE or zip-only tree), **ATAK Device Installer** and **ATAK Imagery Downloader** fetch `origin/main` in the background; after ~2s a “Checking for updates…” progress window may appear. If `main` has new commits, you get a dialog listing recent change subjects and may choose to **stash (if needed), checkout `main`, `git pull --ff-only`, and restart** the same entrypoint.
-- **Release version file** (`VERSION` at repo root): single-line semver read by the update dialog; keep in sync with Git tags and release notes.
+- **Linux install zip on Releases:** download **`atak-imagery-v*-linux-install.zip`** from GitHub Assets (full tree under `atak-imagery/` for `install_linux.sh`; built with `python3 scripts/build_release.py`).
 - *(Prior v1.0.x behavior retained: DC handling, DTED push paths, `deploy.env.example`, tile plan cache tooling, etc.)*
 
 **Auto-update requirements:** **Git** on `PATH`, network to `origin`, and a clone with `origin` pointing at this repository. Release zips and PyInstaller bundles without `.git` skip the check silently.
