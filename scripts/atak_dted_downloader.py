@@ -20,6 +20,7 @@ import requests
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
 
+from tk_window_scaling import apply_fixed_size_window, apply_resizable_window
 
 APP_TITLE = "ATAK DTED Downloader"
 BASE_URL = "http://31.220.30.74/dted"
@@ -648,8 +649,6 @@ class StateSelectionDialog(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(f"{APP_TITLE} - Select States")
-        self.geometry("620x700")
-        self.minsize(620, 700)
         self.resizable(False, False)
         self.configure(cursor="arrow")
 
@@ -705,6 +704,7 @@ class StateSelectionDialog(tk.Tk):
         tk.Button(btns, text="Cancel", width=12, command=self.cancel).pack(side="right", padx=(6, 0))
         tk.Button(btns, text="OK", width=12, command=self.submit).pack(side="right")
 
+        apply_fixed_size_window(self, 620, 700)
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         self.lift()
         self.attributes("-topmost", True)
@@ -745,7 +745,6 @@ class ProgressWindow(tk.Tk):
     def __init__(self, log_path: Path):
         super().__init__()
         self.title(f"{APP_TITLE} - Progress")
-        self.geometry("860x560")
         self.configure(cursor="arrow")
 
         top = tk.Frame(self, padx=10, pady=10)
@@ -787,6 +786,7 @@ class ProgressWindow(tk.Tk):
         scroll.pack(side="right", fill="y")
         self.text.config(yscrollcommand=scroll.set)
 
+        apply_resizable_window(self, 860, 560, (680, 400))
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.closed = False
         self.completion_message = None

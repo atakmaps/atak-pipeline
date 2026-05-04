@@ -83,11 +83,17 @@ import requests
 try:
     import tkinter as tk
     from tkinter import messagebox, scrolledtext, ttk
+
+    from git_update_check import run_startup_git_update_check
+    from tk_window_scaling import apply_resizable_window, scaled_int
 except Exception:  # pragma: no cover
     tk = None
     messagebox = None
     scrolledtext = None
     ttk = None
+    apply_resizable_window = None  # type: ignore[assignment]
+    scaled_int = None  # type: ignore[assignment]
+    run_startup_git_update_check = None  # type: ignore[assignment]
 
 APP_TITLE = "ATAK Device Installer"
 DEFAULT_ATAK_PACKAGE = "com.atakmap.app.civ"
@@ -562,8 +568,6 @@ class DeployWizard(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(APP_TITLE)
-        self.geometry("560x520")
-        self.minsize(520, 420)
         self.configure(cursor="arrow")
         self.selected_serial: Optional[str] = None
         self.manifest_url = env_optional("ATAK_DEPLOY_MANIFEST_URL")
@@ -615,6 +619,8 @@ class DeployWizard(tk.Tk):
         self.status = tk.Label(self.footer, text="", anchor="w", justify="left", fg="gray25")
 
         self.body.pack(fill="both", expand=True, pady=(0, 12))
+        _dw_scale = apply_resizable_window(self, 560, 520, (520, 420))
+        self.body.configure(wraplength=scaled_int(500, _dw_scale))
         self.btn_row.pack(fill="x")
         self.progress.pack(fill="x", pady=(8, 0))
         self.status.pack(fill="x", pady=(4, 0))
@@ -940,6 +946,8 @@ def main() -> None:
     if tk is None or scrolledtext is None:
         print("tkinter is required for this wizard.", file=sys.stderr)
         sys.exit(1)
+    if run_startup_git_update_check is not None:
+        run_startup_git_update_check(app_title=APP_TITLE, script_path=Path(__file__).resolve())
     ensure_gui_path_for_adb()
     load_deploy_env_file()
     w = DeployWizard()

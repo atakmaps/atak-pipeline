@@ -39,6 +39,9 @@ import requests
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
+from git_update_check import run_startup_git_update_check
+from tk_window_scaling import apply_fixed_size_window, apply_resizable_window, scale_factor, scaled_int
+
 APP_TITLE = "ATAK Imagery Downloader"
 
 LAUNCHED_FROM_DEVICE_INSTALLER_ENV = "ATAK_DOWNLOADER_LAUNCHED_FROM_DEVICE_INSTALLER"
@@ -353,13 +356,14 @@ def show_downloader_intro_and_verify_device() -> bool:
     """ATAK + USB prerequisites, then adb device / unlock check. Return True to proceed."""
     root = tk.Tk()
     root.title(APP_TITLE)
-    root.geometry("640x520")
-    root.minsize(560, 420)
     root.configure(cursor="arrow")
+    _intro_scale = apply_resizable_window(root, 640, 520, (560, 420))
     proceed = {"ok": False}
 
     tk.Label(root, text="Before you begin", font=("Arial", 12, "bold")).pack(anchor="w", padx=16, pady=(16, 6))
-    tk.Label(root, text=DOWNLOADER_INTRO_TEXT, justify="left", wraplength=600).pack(anchor="w", padx=16, pady=(0, 8))
+    tk.Label(root, text=DOWNLOADER_INTRO_TEXT, justify="left", wraplength=scaled_int(600, _intro_scale)).pack(
+        anchor="w", padx=16, pady=(0, 8)
+    )
 
     status_var = tk.StringVar(value="")
     tk.Label(root, textvariable=status_var, fg="#333").pack(anchor="w", padx=16, pady=(4, 8))
@@ -411,11 +415,12 @@ def show_downloader_session_exit_dialog(parent: tk.Tk, body: Optional[str] = Non
     dlg.transient(parent)
     dlg.grab_set()
     dlg.resizable(False, False)
+    _exit_scale = apply_fixed_size_window(dlg, 520, 280)
     tk.Label(
         dlg,
         text=text,
         justify="center",
-        wraplength=480,
+        wraplength=scaled_int(460, _exit_scale),
     ).pack(padx=24, pady=(20, 12))
 
     def on_next() -> None:
@@ -624,8 +629,6 @@ class StateSelectionDialog(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(f"{APP_TITLE} - Select States")
-        self.geometry("620x700")
-        self.minsize(620, 700)
         self.resizable(False, False)
         self.configure(cursor="arrow")
 
@@ -675,6 +678,7 @@ class StateSelectionDialog(tk.Tk):
         tk.Button(btns, text="Cancel", width=12, command=self.cancel).pack(side="right", padx=(6, 0))
         tk.Button(btns, text="OK", width=12, command=self.submit).pack(side="right")
 
+        apply_fixed_size_window(self, 620, 700)
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         self.lift()
         self.attributes("-topmost", True)
@@ -715,9 +719,10 @@ class ZoomDialog(tk.Tk):
     def __init__(self, selected_states: List[str], zoom_estimates: Dict[str, Dict[str, Dict[str, int]]]) -> None:
         super().__init__()
         self.title(f"{APP_TITLE} - Select Zoom Levels")
-        self.geometry("1040x780")
         self.resizable(False, False)
         self.configure(cursor="arrow")
+        self.update_idletasks()
+        _zs = scale_factor(self)
 
         self.result: List[int] = []
         self.go_back = False
@@ -730,7 +735,7 @@ class ZoomDialog(tk.Tk):
         frame = tk.Frame(self, padx=28, pady=20)
         frame.pack(fill="both", expand=True)
 
-        note_wrap = 940
+        note_wrap = scaled_int(940, _zs)
 
         tk.Label(
             frame,
@@ -753,8 +758,8 @@ class ZoomDialog(tk.Tk):
         bg = frame.cget("bg")
         intro = tk.Text(
             frame,
-            height=8,
-            width=102,
+            height=max(5, int(round(8 * _zs))),
+            width=max(42, int(round(102 * _zs))),
             wrap="word",
             font=("Arial", 12),
             relief="flat",
@@ -859,6 +864,7 @@ class ZoomDialog(tk.Tk):
         tk.Button(btns, text="OK", width=12, command=self.submit).pack(side="right")
 
         self.protocol("WM_DELETE_WINDOW", self.cancel)
+        apply_fixed_size_window(self, 1040, 780)
         self.lift()
         self.attributes("-topmost", True)
         self.after(300, lambda: self.attributes("-topmost", False))
@@ -966,7 +972,6 @@ class ProgressWindow(tk.Tk):
     def __init__(self, log_path: Path):
         super().__init__()
         self.title(f"{APP_TITLE} - Progress")
-        self.geometry("860x560")
         self.configure(cursor="arrow")
 
         top = tk.Frame(self, padx=10, pady=10)
@@ -1019,6 +1024,7 @@ class ProgressWindow(tk.Tk):
         scroll.pack(side="right", fill="y")
         self.text.config(yscrollcommand=scroll.set)
 
+        apply_resizable_window(self, 860, 560, (680, 400))
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.closed = False
         self.completion_message = None
@@ -1504,6 +1510,7 @@ def pump_gui_logs(window: ProgressWindow) -> None:
 
 
 def main() -> None:
+    run_startup_git_update_check(app_title=APP_TITLE, script_path=Path(__file__).resolve())
     log(f"Log file: {LOGGER.log_file}")
     log(f"Bundled script directory: {BUNDLED_SCRIPT_DIR}")
     log(f"Runtime state directory: {RUNTIME_STATE_DIR}")

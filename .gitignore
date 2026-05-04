@@ -80,6 +80,6 @@ deploy.env
 
 # --- Local notes / handoffs ---
 atak_pipeline_handoff*.md
-
+HANDOFF_AGENT.local.md
 # --- IDE / agent (local only) ---
 .cursor/

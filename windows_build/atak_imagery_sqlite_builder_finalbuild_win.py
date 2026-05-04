@@ -47,12 +47,15 @@ from typing import Dict, Iterable, List, Optional, Tuple
 try:
     import tkinter as tk
     from tkinter import filedialog, messagebox, simpledialog, ttk
+
+    from tk_window_scaling import apply_resizable_window
 except Exception:  # pragma: no cover
     tk = None
     filedialog = None
     messagebox = None
     simpledialog = None
     ttk = None
+    apply_resizable_window = None  # type: ignore[assignment]
 
 VALID_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 DEFAULT_PROVIDER = "USGSImageryOnly"
@@ -431,9 +434,8 @@ class App:
             raise RuntimeError("Tkinter is not available on this system.")
         self.root = tk.Tk()
         self.root.title("ATAK Imagery SQLite Builder")
-        self.root.geometry("980x700")
-        self.root.minsize(820, 560)
         self.root.configure(cursor="arrow")
+        apply_resizable_window(self.root, 980, 700, (820, 560))
 
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.logger: Optional[logging.Logger] = None

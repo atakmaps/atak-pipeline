@@ -12,13 +12,13 @@ Source repository: `https://github.com/atakmaps/atak-imagery`
 
 1. Put the project on your machine and open a **terminal**:
    - **Clone:** `git clone https://github.com/atakmaps/atak-imagery.git` then `cd atak-imagery`
-   - **Release zip:** under [Releases](https://github.com/atakmaps/atak-imagery/releases), download **`atak-imagery-v1.0.0-source.zip`** from **Assets** (not the auto-generated “Source code (zip)”, which uses a different folder layout). The **Assets** zip stores every file under a root directory **`atak-imagery/`** inside the archive.
+   - **Release zip:** under [Releases](https://github.com/atakmaps/atak-imagery/releases), download the **`atak-imagery-v*-source.zip`** for your version from **Assets** (not the auto-generated “Source code (zip)”, which uses a different folder layout). The **Assets** zip stores every file under a root directory **`atak-imagery/`** inside the archive.
 
      Run `unzip` in the **same directory as the `.zip` file** (a **parent** folder—usually `Downloads`). That directory will gain a **`atak-imagery`** folder next to the zip:
 
      ```bash
      cd ~/Downloads
-     unzip atak-imagery-v1.0.0-source.zip
+     unzip atak-imagery-v1.1.0-source.zip
      ls atak-imagery/install_linux.sh
      cd atak-imagery
      chmod +x install_linux.sh
@@ -55,11 +55,22 @@ After a successful run, use those desktop entries or the two shell scripts above
 
 ## Current stable release (Linux / source)
 
-**Linux / source release:** `v1.0.0` (tag **`v1.0.0`** on GitHub — version **1.0**).
+**Linux / source release:** `v1.1.0` (tag **`v1.1.0`** on GitHub).
 
-**Windows:** A new Windows packaged build is **not** included in this cycle. **Use Windows release `2.8`** until a newer Windows installer is published.
+**Windows:** A new Windows packaged build is **not** included in this cycle. **Use Windows release `2.8`** until a newer Windows installer is published. Source copies under `windows_build/` include the same startup behaviors when run with Python.
 
-Version **1.0** highlights:
+Version **1.1** highlights:
+
+- **Screen-aware Tk windows** (`scripts/tk_window_scaling.py`): main dialogs scale to fit small laptops and grow modestly on large displays (Device Installer, Imagery Downloader, SQLite builder, DTED downloader — Linux and `windows_build` copies).
+- **Optional in-app update check** (`scripts/git_update_check.py`): when running from a **git clone** (not a frozen EXE or zip-only tree), **ATAK Device Installer** and **ATAK Imagery Downloader** fetch `origin/main` in the background; after ~2s a “Checking for updates…” progress window may appear. If `main` has new commits, you get a dialog listing recent change subjects and may choose to **stash (if needed), checkout `main`, `git pull --ff-only`, and restart** the same entrypoint.
+- **Release version file** (`VERSION` at repo root): single-line semver read by the update dialog; keep in sync with Git tags and release notes.
+- *(Prior v1.0.x behavior retained: DC handling, DTED push paths, `deploy.env.example`, tile plan cache tooling, etc.)*
+
+**Auto-update requirements:** **Git** on `PATH`, network to `origin`, and a clone with `origin` pointing at this repository. Release zips and PyInstaller bundles without `.git` skip the check silently.
+
+**Maintainer note (Windows / PyInstaller):** When packaging with a `.spec` that lists hidden imports explicitly, include **`tk_window_scaling`** and **`git_update_check`**.
+
+### Previous release (v1.0.0)
 
 - **ATAK Device Installer**: production wizard only (debug skip controls removed); post-plugin instructions including device **OK** for plugin install; **Continue** before launching the imagery downloader
 - **ATAK Imagery Downloader**: same SQLite handoff dialog when launched from the installer as in standalone; blocks **District of Columbia** as the only state selection, with an explanation; clearer errors when no states remain to download
@@ -84,6 +95,8 @@ Primary Linux/source scripts:
 - `scripts/atak_imagery_sqlite_builder_finalbuild.py`
 - `scripts/atak_dted_downloader.py`
 - `scripts/build_tile_plan_cache.py` — optional: precompute per-state tile lists into `data/tile_plans/v1/*.tiles.gz` so downloads skip the slow “scanning tile coverage” step (see `scripts/data/tile_plans/README.md`)
+- `scripts/git_update_check.py` — optional startup update offer for git clones (`origin/main`)
+- `scripts/tk_window_scaling.py` — scales Tk geometry to the display
 
 Windows-specific build copies:
 
