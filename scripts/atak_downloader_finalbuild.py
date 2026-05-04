@@ -42,7 +42,13 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 from git_update_check import run_startup_git_update_check
-from tk_window_scaling import apply_fixed_size_window, apply_resizable_window, scale_factor, scaled_int
+from tk_window_scaling import (
+    apply_fixed_size_window,
+    apply_resizable_window,
+    ensure_window_stacking,
+    scale_factor,
+    scaled_int,
+)
 
 APP_TITLE = "ATAK Imagery Downloader"
 
@@ -271,6 +277,8 @@ def ask_adb_serial_choice(parent: tk.Tk, devices: List[str]) -> Optional[str]:
     bf.pack(pady=12)
     tk.Button(bf, text="OK", command=ok).pack(side="left", padx=6)
     tk.Button(bf, text="Cancel", command=cancel).pack(side="left", padx=6)
+    top.update_idletasks()
+    ensure_window_stacking(top, above=parent)
     parent.wait_window(top)
     return choice[0]
 
@@ -370,6 +378,7 @@ def show_downloader_intro_and_verify_device() -> bool:
         btn_cont.configure(state="normal")
         status_var.set("")
         if not ok:
+            ensure_window_stacking(root)
             messagebox.showwarning(APP_TITLE, err, parent=root)
             return
         proceed["ok"] = True
@@ -393,6 +402,7 @@ DOWNLOADER_NEXT_SQLITE_DIALOG_TEXT = (
 
 def show_downloader_session_exit_dialog(parent: tk.Tk, body: Optional[str] = None) -> None:
     """After imagery (and optional inline DTED), prompt user before launching the SQLite builder."""
+    ensure_window_stacking(parent)
     text = body if body is not None else DOWNLOADER_NEXT_SQLITE_DIALOG_TEXT
     dlg = tk.Toplevel(parent)
     dlg.title(APP_TITLE)
@@ -664,9 +674,6 @@ class StateSelectionDialog(tk.Tk):
 
         apply_fixed_size_window(self, 620, 700)
         self.protocol("WM_DELETE_WINDOW", self.cancel)
-        self.lift()
-        self.attributes("-topmost", True)
-        self.after(300, lambda: self.attributes("-topmost", False))
 
     def select_all(self) -> None:
         self.result_mode = "all"
@@ -676,16 +683,19 @@ class StateSelectionDialog(tk.Tk):
     def submit(self) -> None:
         selected = sorted([state for state, var in self.vars.items() if var.get()])
         if not selected:
-            messagebox.showwarning(APP_TITLE, "Select at least one state.")
+            ensure_window_stacking(self)
+            messagebox.showwarning(APP_TITLE, "Select at least one state.", parent=self)
             return
         with_imagery = [s for s in selected if s != "District of Columbia"]
         if not with_imagery:
+            ensure_window_stacking(self)
             messagebox.showwarning(
                 APP_TITLE,
                 "District of Columbia cannot be used alone for this download.\n\n"
                 "USGS imagery here follows full state boundaries; Washington D.C. is omitted from that set.\n"
                 "Select at least one state (e.g. Maryland or Delaware). Note: “District of Columbia” is "
                 "listed right under Delaware.",
+                parent=self,
             )
             return
         self.result_states = selected
@@ -850,9 +860,6 @@ class ZoomDialog(tk.Tk):
 
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         apply_fixed_size_window(self, 1040, 780)
-        self.lift()
-        self.attributes("-topmost", True)
-        self.after(300, lambda: self.attributes("-topmost", False))
 
         threading.Thread(target=self._throughput_probe_worker, daemon=True).start()
         self.update_size_label()
@@ -941,7 +948,8 @@ class ZoomDialog(tk.Tk):
     def submit(self) -> None:
         self.result = sorted([z for z, var in self.vars.items() if var.get()])
         if not self.result:
-            messagebox.showwarning(APP_TITLE, "Select at least one zoom level.")
+            ensure_window_stacking(self)
+            messagebox.showwarning(APP_TITLE, "Select at least one zoom level.", parent=self)
             return
         self.destroy()
 
@@ -1096,6 +1104,7 @@ class ProgressWindow(tk.Tk):
             pass
 
     def _on_cancel_download(self) -> None:
+        ensure_window_stacking(self)
         if not messagebox.askyesno(
             APP_TITLE,
             "Stop downloading and exit the program?",
@@ -1124,6 +1133,7 @@ class ProgressWindow(tk.Tk):
             self.closed = True
             self.destroy()
             return
+        ensure_window_stacking(self)
         if messagebox.askyesno(
             APP_TITLE,
             "Stop downloading and exit the program?",
@@ -1171,6 +1181,7 @@ def show_summary_confirm(selected_states: List[str], selected_zooms: List[int], 
         root.update()
     except tk.TclError:
         pass
+    ensure_window_stacking(root)
     messagebox.showinfo(APP_TITLE, msg, parent=root)
     try:
         root.destroy()
@@ -1237,6 +1248,7 @@ def ask_output_parent() -> str:
     root.attributes("-topmost", True)
     root.update_idletasks()
     root.lift()
+    ensure_window_stacking(root)
     try:
         folder = filedialog.askdirectory(
             title=pick_title,
@@ -1622,13 +1634,17 @@ def pump_gui_logs(window: ProgressWindow) -> None:
                     subprocess.Popen([sys.executable, str(next_script)])
                     os._exit(0)
             except Exception as exc:
-                messagebox.showerror(APP_TITLE, f"Failed to launch SQLite builder:\n{exc}")
+                ensure_window_stacking(window)
+                messagebox.showerror(
+                    APP_TITLE, f"Failed to launch SQLite builder:\n{exc}", parent=window
+                )
                 sys.exit(1)
 
         if getattr(window, "error_message", None):
             msg = window.error_message
             window.error_message = None
-            messagebox.showerror(APP_TITLE, msg)
+            ensure_window_stacking(window)
+            messagebox.showerror(APP_TITLE, msg, parent=window)
             window.closed = True
             window.destroy()
             return

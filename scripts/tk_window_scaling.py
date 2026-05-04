@@ -7,7 +7,7 @@ scales proportionally to the available screen, clamps so the window fits within 
 from __future__ import annotations
 
 import tkinter as tk
-from typing import Tuple
+from typing import Optional, Tuple
 
 # Layout baseline matching typical design assumptions in this repo.
 REF_SCREEN_W = 1920
@@ -64,6 +64,7 @@ def apply_fixed_size_window(win: tk.Wm, base_w: int, base_h: int) -> float:
         win.maxsize(w, h)
     except tk.TclError:
         pass
+    ensure_window_stacking(win)
     return s
 
 
@@ -80,8 +81,92 @@ def apply_resizable_window(win: tk.Wm, base_w: int, base_h: int, base_minsize: T
         win.minsize(mw, mh)
     except tk.TclError:
         pass
+    ensure_window_stacking(win)
     return s
 
 
 def scaled_int(base_px: int, scale: float) -> int:
     return max(80, int(round(base_px * scale)))
+
+
+def raise_to_front(
+    win: tk.Misc,
+    *,
+    persistent_topmost: bool = False,
+    above: Optional[tk.Misc] = None,
+    flash_topmost: bool = True,
+    topmost_ms: int = 450,
+) -> None:
+    """
+    Raise a window so it stacks above normal windows. On many Linux WMs, ``lift()`` alone
+    leaves new windows behind; a short ``-topmost`` flash (or repeat lifts after map)
+    matches what users expect for modals.
+    """
+    try:
+        top = win.winfo_toplevel()
+    except tk.TclError:
+        return
+    try:
+        if above is not None:
+            try:
+                top.lift(above)
+            except tk.TclError:
+                top.lift()
+        else:
+            top.lift()
+        if flash_topmost or persistent_topmost:
+            top.attributes("-topmost", True)
+    except tk.TclError:
+        try:
+            top.lift()
+        except tk.TclError:
+            return
+    try:
+        top.update_idletasks()
+    except tk.TclError:
+        pass
+    try:
+        top.focus_force()
+    except tk.TclError:
+        pass
+    if flash_topmost and not persistent_topmost:
+
+        def clear() -> None:
+            try:
+                top.attributes("-topmost", False)
+            except tk.TclError:
+                pass
+
+        top.after(topmost_ms, clear)
+
+
+def ensure_window_stacking(
+    win: tk.Misc,
+    *,
+    above: Optional[tk.Misc] = None,
+    persistent_topmost: bool = False,
+) -> None:
+    """Raise immediately and again after idle / short delays (compositor timing)."""
+    raise_to_front(
+        win,
+        persistent_topmost=persistent_topmost,
+        above=above,
+        flash_topmost=True,
+    )
+    try:
+        top = win.winfo_toplevel()
+    except tk.TclError:
+        return
+
+    def again(*, flash: bool) -> None:
+        raise_to_front(
+            win,
+            persistent_topmost=persistent_topmost,
+            above=above,
+            flash_topmost=flash,
+            topmost_ms=450,
+        )
+
+    top.after_idle(lambda: again(flash=False))
+    top.after(100, lambda: again(flash=False))
+    top.after(280, lambda: again(flash=False))

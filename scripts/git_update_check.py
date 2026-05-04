@@ -115,34 +115,54 @@ def _git_status_dirty(repo: Path) -> bool:
     return code == 0 and bool(out.strip())
 
 
-def _perform_update_and_restart(repo_root: Path, app_title: str) -> None:
+def _perform_update_and_restart(repo_root: Path, app_title: str, parent: Optional[object] = None) -> None:
     from tkinter import messagebox
+
+    from tk_window_scaling import ensure_window_stacking
+
+    def _prep() -> None:
+        if parent is not None:
+            ensure_window_stacking(parent)  # type: ignore[arg-type]
+            try:
+                parent.update_idletasks()  # type: ignore[attr-defined]
+            except Exception:
+                pass
 
     if _git_status_dirty(repo_root):
         code, _, err = _run_git(repo_root, "stash", "push", "-u", "-m", "atak-pipeline auto-update", timeout=120)
         if code != 0:
-            messagebox.showerror(app_title, f"Could not stash local changes:\n{err or 'git stash failed'}")
+            _prep()
+            messagebox.showerror(
+                app_title,
+                f"Could not stash local changes:\n{err or 'git stash failed'}",
+                parent=parent,
+            )
             return
 
     code, _, err = _run_git(repo_root, "checkout", "main", timeout=60)
     if code != 0:
         code, _, err2 = _run_git(repo_root, "checkout", "-b", "main", "origin/main", timeout=60)
         if code != 0:
+            _prep()
             messagebox.showerror(
                 app_title,
                 f"Could not checkout main:\n{err or err2 or 'git checkout failed'}",
+                parent=parent,
             )
             return
 
     code, _, err = _run_git(repo_root, "pull", "origin", "main", "--ff-only", timeout=180)
     if code != 0:
+        _prep()
         messagebox.showerror(
             app_title,
             f"Could not fast-forward main.\nResolve manually in:\n{repo_root}\n\n{err or 'git pull failed'}",
+            parent=parent,
         )
         return
 
-    messagebox.showinfo(app_title, "Update complete. The application will restart.")
+    _prep()
+    messagebox.showinfo(app_title, "Update complete. The application will restart.", parent=parent)
     os.execv(sys.executable, [sys.executable, *sys.argv])
 
 
@@ -162,6 +182,8 @@ def run_startup_git_update_check(*, app_title: str, script_path: Path) -> None:
 
     import tkinter as tk
     from tkinter import messagebox, ttk
+
+    from tk_window_scaling import ensure_window_stacking
 
     root = tk.Tk()
     root.withdraw()
@@ -184,6 +206,7 @@ def run_startup_git_update_check(*, app_title: str, script_path: Path) -> None:
         bar.pack(pady=(8, 0))
         bar.start(12)
         progress.update_idletasks()
+        ensure_window_stacking(progress)
 
     progress_timer = root.after(2000, show_progress)
 
@@ -225,11 +248,13 @@ def run_startup_git_update_check(*, app_title: str, script_path: Path) -> None:
         )
         root.deiconify()
         root.update_idletasks()
+        ensure_window_stacking(root)
+        root.update_idletasks()
         if not messagebox.askyesno(app_title, body, parent=root):
             root.destroy()
             return
 
-        _perform_update_and_restart(repo_root, app_title)
+        _perform_update_and_restart(repo_root, app_title, root)
         root.destroy()
 
     def poll() -> None:

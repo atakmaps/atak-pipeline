@@ -48,7 +48,7 @@ try:
     import tkinter as tk
     from tkinter import filedialog, messagebox, simpledialog, ttk
 
-    from tk_window_scaling import apply_resizable_window
+    from tk_window_scaling import apply_resizable_window, ensure_window_stacking
 except Exception:  # pragma: no cover
     tk = None
     filedialog = None
@@ -56,6 +56,7 @@ except Exception:  # pragma: no cover
     simpledialog = None
     ttk = None
     apply_resizable_window = None  # type: ignore[assignment]
+    ensure_window_stacking = None  # type: ignore[assignment]
 
 VALID_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 DEFAULT_PROVIDER = "USGSImageryOnly"
@@ -73,27 +74,9 @@ LAST_IMAGERY_SESSION_STATES_FILE = RUNTIME_STATE_DIR / ".last_imagery_session_st
 
 
 def _bring_window_forward(win, *, persistent_topmost: bool = False) -> None:
-    if tk is None:
+    if ensure_window_stacking is None:
         return
-    try:
-        win.lift()
-        win.attributes("-topmost", True)
-        win.update_idletasks()
-        try:
-            win.focus_force()
-        except tk.TclError:
-            pass
-        if not persistent_topmost:
-
-            def _clear_top() -> None:
-                try:
-                    win.attributes("-topmost", False)
-                except tk.TclError:
-                    pass
-
-            win.after(400, _clear_top)
-    except tk.TclError:
-        pass
+    ensure_window_stacking(win, persistent_topmost=persistent_topmost)
 
 
 @dataclass

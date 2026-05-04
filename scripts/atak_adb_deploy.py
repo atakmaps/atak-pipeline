@@ -85,7 +85,7 @@ try:
     from tkinter import messagebox, scrolledtext, ttk
 
     from git_update_check import run_startup_git_update_check
-    from tk_window_scaling import apply_resizable_window, scaled_int
+    from tk_window_scaling import apply_resizable_window, ensure_window_stacking, scaled_int
 except Exception:  # pragma: no cover
     tk = None
     messagebox = None
@@ -93,6 +93,7 @@ except Exception:  # pragma: no cover
     ttk = None
     apply_resizable_window = None  # type: ignore[assignment]
     scaled_int = None  # type: ignore[assignment]
+    ensure_window_stacking = None  # type: ignore[assignment]
     run_startup_git_update_check = None  # type: ignore[assignment]
 
 APP_TITLE = "ATAK Device Installer"
@@ -629,6 +630,11 @@ class DeployWizard(tk.Tk):
         self._step = 0
         self._render_step()
 
+    def _focus_for_dialog(self) -> None:
+        if ensure_window_stacking is not None:
+            ensure_window_stacking(self)
+            self.update_idletasks()
+
     def _atak_install_ready(self) -> bool:
         return bool(self.manifest_url) or bool(self._inline_atak_manifest)
 
@@ -729,6 +735,7 @@ class DeployWizard(tk.Tk):
 
     def _step_connect_check(self) -> None:
         if not self._atak_install_ready():
+            self._focus_for_dialog()
             messagebox.showerror(
                 APP_TITLE,
                 "ATAK install links are not configured yet.\n\n"
@@ -736,13 +743,16 @@ class DeployWizard(tk.Tk):
                 f"{DEPLOY_ENV_PATH}\n\n"
                 "Set either ATAK_CIV_APK_URL + ATAK_CIV_VERSION, or ATAK_DEPLOY_MANIFEST_URL.\n"
                 "Then start this installer again.",
+                parent=self,
             )
             return
 
         if not adb_available():
+            self._focus_for_dialog()
             messagebox.showerror(
                 APP_TITLE,
                 "adb was not found. Install Android platform tools (adb) and ensure it is on PATH.",
+                parent=self,
             )
             return
 
@@ -754,12 +764,14 @@ class DeployWizard(tk.Tk):
             detail = adb_devices_human_summary()
             if len(detail) > 2400:
                 detail = detail[:2400] + "\n…"
+            self._focus_for_dialog()
             messagebox.showwarning(
                 APP_TITLE,
                 "No Android device in the *device* state (ready for adb).\n\n"
                 "If the phone shows “unauthorized”, unlock it and accept the USB debugging "
                 "prompt. If you see “no permissions”, install udev rules for adb.\n\n"
                 f"{detail}",
+                parent=self,
             )
             return
 
@@ -795,6 +807,9 @@ class DeployWizard(tk.Tk):
         bf.pack(pady=12)
         tk.Button(bf, text="OK", command=ok).pack(side="left", padx=6)
         tk.Button(bf, text="Cancel", command=cancel).pack(side="left", padx=6)
+        top.update_idletasks()
+        if ensure_window_stacking is not None:
+            ensure_window_stacking(top, above=self)
         self.wait_window(top)
         return choice[0]
 
@@ -854,7 +869,8 @@ class DeployWizard(tk.Tk):
             self.progress.stop()
             self._step = 0
             self._cleanup_temp_apks()
-            messagebox.showerror(APP_TITLE, f"Could not install ATAK:\n{err}")
+            self._focus_for_dialog()
+            messagebox.showerror(APP_TITLE, f"Could not install ATAK:\n{err}", parent=self)
             self._render_step()
             return
         try:
@@ -915,7 +931,8 @@ class DeployWizard(tk.Tk):
         self.progress.stop()
         if err:
             self._cleanup_temp_apks()
-            messagebox.showerror(APP_TITLE, f"Could not install plugin:\n{err}")
+            self._focus_for_dialog()
+            messagebox.showerror(APP_TITLE, f"Could not install plugin:\n{err}", parent=self)
             self._step = 3
             self._render_step()
             return
@@ -935,9 +952,11 @@ class DeployWizard(tk.Tk):
         try:
             subprocess.Popen([sys.executable, str(DOWNLOADER)])
         except Exception as e:
+            self._focus_for_dialog()
             messagebox.showerror(
                 APP_TITLE,
                 f"Failed to start imagery pipeline (installer entry):\n{e}",
+                parent=self,
             )
         self.destroy()
 

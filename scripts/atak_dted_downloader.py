@@ -20,7 +20,11 @@ import requests
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
 
-from tk_window_scaling import apply_fixed_size_window, apply_resizable_window
+from tk_window_scaling import (
+    apply_fixed_size_window,
+    apply_resizable_window,
+    ensure_window_stacking,
+)
 
 APP_TITLE = "ATAK DTED Downloader"
 BASE_URL = "http://31.220.30.74/dted"
@@ -68,25 +72,7 @@ def consume_standalone_dted_skip() -> bool:
 
 def bring_window_forward(win: tk.Misc, *, persistent_topmost: bool = False) -> None:
     """Raise a window above others; on some WMs ``-topmost`` is needed briefly (or kept for modals)."""
-    try:
-        win.lift()
-        win.attributes("-topmost", True)
-        win.update_idletasks()
-        try:
-            win.focus_force()
-        except tk.TclError:
-            pass
-        if not persistent_topmost:
-
-            def _clear() -> None:
-                try:
-                    win.attributes("-topmost", False)
-                except tk.TclError:
-                    pass
-
-            win.after(400, _clear)
-    except tk.TclError:
-        pass
+    ensure_window_stacking(win, persistent_topmost=persistent_topmost)
 
 
 def _session_allowed_atak_sql_filenames() -> Optional[set[str]]:
@@ -706,9 +692,6 @@ class StateSelectionDialog(tk.Tk):
 
         apply_fixed_size_window(self, 620, 700)
         self.protocol("WM_DELETE_WINDOW", self.cancel)
-        self.lift()
-        self.attributes("-topmost", True)
-        self.after(300, lambda: self.attributes("-topmost", False))
 
     def select_all(self) -> None:
         self.result_mode = "all"
