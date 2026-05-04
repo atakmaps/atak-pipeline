@@ -53,6 +53,12 @@ if duplicates:
     for d in duplicates:
         print(" -", d)
 
+tile_dir = ROOT / "scripts/data/tile_plans/v1"
+tile_gz = sorted(tile_dir.glob("*.tiles.gz")) if tile_dir.is_dir() else []
+if tile_gz:
+    print(f"\nTile plan caches: {len(tile_gz)} file(s) under scripts/data/tile_plans/v1/")
+    print("  Validate:  python3 scripts/verify_tile_plan_caches.py")
+
 if not missing and not duplicates:
     print("\nEverything looks clean.")
 
